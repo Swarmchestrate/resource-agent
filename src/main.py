@@ -1,5 +1,5 @@
 """
-FastAPI application entry point for Swarmchestrate Resource Agent.
+FastAPI application entry point for resource Agent.
 """
 
 from fastapi import FastAPI
