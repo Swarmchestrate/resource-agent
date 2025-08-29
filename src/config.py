@@ -1,14 +1,3 @@
-"""
-Configuration management for Swarmchestrate Resource Agent.
-
-Step 2: Role: Defines the Pydantic model for configuration and loads settings from 
-config/config.yaml. 
-Function: Provides the RAConfig object used to configure the RA 
-instance
-
-3rd one is: src/ra_core.py
-"""
-
 from pydantic import BaseModel, Field
 import yaml
 from pathlib import Path
