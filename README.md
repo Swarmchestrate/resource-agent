@@ -1,4 +1,4 @@
-#  Resource Agent
+#  Swarmchestrate - Resource Agent
 
 A P2P-based resource agent for distributed computing that broadcasts resource requirements and matches them with available capacity.
 
