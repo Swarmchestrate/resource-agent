@@ -1,6 +1,3 @@
-# Static Capacity Profiles for Resource Agents
-
-
 capacity_profiles:
   ra-local:
     metadata:
