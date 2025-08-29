@@ -1,0 +1,21 @@
+# Configuration for Stalki OpenStack Cloud RA
+# IP: 193.225.251.219
+
+id: "Stalki-RA"
+capacity_id: "stalki_openstack_provider"
+universe_id: "swarmchestrate_universe"
+
+credentials:
+  provider: "openstack"
+  access_key: "your_openstack_access_key"
+  secret_key: "your_openstack_secret_key"
+
+api_port: 8003  # Different port to avoid conflicts
+p2p_port: 5003  # Different P2P port
+domain: "0.0.0.0"  # Listen on all interfaces
+
+# Bootstrap peers - connect to AWS-RA2 as the hub
+bootstrap_peers:
+  - "35.179.157.83:5001"  # AWS-RA2 hub
+
+

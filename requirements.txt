@@ -1,0 +1,40 @@
+# Swarmchestrate Resource Agent Dependencies
+
+# FastAPI and web framework
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+
+# Pydantic for data validation
+pydantic==2.11.7
+pydantic-settings==2.10.1
+
+# YAML configuration
+PyYAML==6.0.2
+
+# P2P networking (lib_comm dependencies)
+twisted>=25.5.0
+kademlia>=2.2.2
+u-msgpack-python>=2.8.0
+miniupnpc>=2.2.8
+
+# Async support
+asyncio-mqtt==0.16.1
+
+# Logging and monitoring
+python-json-logger==2.0.7
+
+# Development dependencies
+pytest==8.4.1
+pytest-asyncio==0.23.5
+black==25.1.0
+flake8==7.0.0
+
+# Environment management
+python-dotenv==1.1.1
+
+# HTTP client for API calls
+httpx==0.27.0
+
+# Data serialization
+msgpack==1.0.7
+

@@ -1,0 +1,14 @@
+id: "ra-local"
+capacity_id: "cloud_provider_1"
+universe_id: "swarmchestrate_universe"
+credentials:
+  provider: "local_host"
+  access_key: "YOUR_AWS_ACCESS_KEY"
+  secret_key: "YOUR_AWS_SECRET_KEY"
+api_port: 8000 #This is the HTTP API port where your Local RA serves its REST API endpoints
+p2p_port: 5000 #This is the P2P port where your Local RA listens for incoming connections
+domain: "0.0.0.0"  
+bootstrap_peers: ["35.179.157.83:5001"]  # Local RA connects to central hub (AWS-RA2)
+
+
+
