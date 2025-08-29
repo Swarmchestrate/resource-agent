@@ -1,12 +1,3 @@
-"""
-Role: Contains the core business logic of the RA,
-including the submit_application method that processes 
-the application submission.
-
-Function: Handles the internal logic for resource allocation 
-(currently a placeholder).
-"""
-
 import logging
 import time
 from pathlib import Path
