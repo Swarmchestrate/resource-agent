@@ -7,13 +7,6 @@ from config import RAConfig
 from utils.helpers import generate_reservation_id, validate_app_description, get_app_summary, format_app_description
 from utils.resource_offer_system import ResourceRequestBroadcaster
 
-
-"""
-Updated to use new lib_comm v0.3.0 from local directory:
-Path: Swarmchestrate_RA/lib_comm/swchp2pcom/
-Using SwchPeer class with advanced P2P network features
-"""
-# Import P2P components from new lib_comm v0.3.0
 try:
     import sys
     from pathlib import Path
