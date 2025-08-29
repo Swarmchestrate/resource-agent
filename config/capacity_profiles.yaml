@@ -1,6 +1,5 @@
 # Static Capacity Profiles for Resource Agents
-# Designed to match ask.yaml requirements format
-# Realistic specifications that can fulfill actual requests
+
 
 capacity_profiles:
   ra-local:
