@@ -5,7 +5,7 @@ credentials:
   provider: "aws"
   access_key: "YOUR_AWS_ACCESS_KEY"
   secret_key: "YOUR_AWS_SECRET_KEY"
-api_port: 8002
-p2p_port: 5002
-bootstrap_peers: ["35.179.157.83:5001"]  # AWS-RA3 connects to  (AWS-RA2)
+api_port: ""
+p2p_port: ""
+bootstrap_peers: ["IP":p2p_port"]  # AWS-RA3 connects to  (AWS-RA2)
 domain: "0.0.0.0"  # Bind to all interfaces on EC2
