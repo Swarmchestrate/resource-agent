@@ -96,7 +96,6 @@ A P2P-based resource agent for distributed computing that broadcasts resource re
 ================================================================================
  RA Status: 200
  Response: {'ra_id': 'ra-local', 'status': 'running', 'p2p_available': True}
- Using new /broadcast-ask endpoint (bypasses TOSCA validation)
  ask.yaml requirements broadcasted successfully!
  RA ID: ra-local
  Broadcast Status: broadcasted_to_p2p_network
