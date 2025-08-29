@@ -5,7 +5,7 @@ capacity_profiles:
   ra-local:
     metadata:
       ra_id: "ra-local"
-      machine_type: "HP EliteBook 640 G11"
+      machine_type: "HP"
       location: "Edinburgh"
       description: "Local Windows development machine - Intel Core Ultra 5"
       version: "1.0"
@@ -134,12 +134,12 @@ capacity_profiles:
           powered-type: Mains
           consumption: 120 W
 
-  Stalki-RA:
+  SZTAKI-RA:
     metadata:
-      ra_id: "Stalki-RA"
+      ra_id: "SZTAKI-RA"
       machine_type: "openstack-instance"
-      location: "sztalki-cloud"
-      description: "OpenStack instance in Sztalki cloud"
+      location: "SZTAKI-cloud"
+      description: "OpenStack instance in SZTAKI cloud"
       version: "1.0"
     
     capabilities:
@@ -159,7 +159,7 @@ capacity_profiles:
       resource:
         properties:
           provider: OpenStack
-          capacity-provider: Stalki
+          capacity-provider: SZTAKI
           type: cloud
       
       pricing:
