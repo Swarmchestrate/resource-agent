@@ -1,5 +1,3 @@
-# Configuration for SZTAKI OpenStack Cloud RA
-
 id: "SZTAKI-RA"
 capacity_id: "SZTAKI_openstack_provider"
 universe_id: "swarmchestrate_universe"
