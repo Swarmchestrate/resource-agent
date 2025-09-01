@@ -11,12 +11,8 @@ pydantic-settings==2.10.1
 # YAML configuration
 PyYAML==6.0.2
 
-# P2P networking (lib_comm dependencies)
-twisted>=25.5.0
-kademlia>=2.2.2
-u-msgpack-python>=2.8.0
-miniupnpc>=2.2.8
-
+# P2P Communication Library 
+git+https://github.com/Swarmchestrate/lib_comm.git@main
 # Async support
 asyncio-mqtt==0.16.1
 
