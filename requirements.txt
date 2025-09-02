@@ -12,7 +12,7 @@ pydantic-settings==2.10.1
 PyYAML==6.0.2
 
 # P2P Communication Library 
-git+https://github.com/Swarmchestrate/lib_comm.git@main
+swchp2pcom==0.3.0
 # Async support
 asyncio-mqtt==0.16.1
 
