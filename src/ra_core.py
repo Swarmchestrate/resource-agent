@@ -1,30 +1,11 @@
 import logging
 import time
-from pathlib import Path
 import yaml
 from typing import Dict, Any
 from config import RAConfig
 from utils.helpers import generate_reservation_id, validate_app_description, get_app_summary, format_app_description
 from utils.resource_offer_system import ResourceRequestBroadcaster
 
-try:
-    import sys
-    from pathlib import Path
-    # Add new lib_comm to path (local directory)
-    lib_comm_path = Path(__file__).parent.parent / "lib_comm"
-    if lib_comm_path.exists():
-        sys.path.insert(0, str(lib_comm_path))
-        from swchp2pcom.swchpeer import SwchPeer
-        from swchp2pcom.message_types import SystemMessageType
-        P2P_AVAILABLE = True
-        print("Successfully imported new lib_comm v0.3.0 P2P library with SwchPeer")
-        print(f"Library path: {lib_comm_path}")
-    else:
-        P2P_AVAILABLE = False
-        print(f"ERROR: lib_comm not found at {lib_comm_path}")
-except ImportError as e:
-    P2P_AVAILABLE = False
-    print(f"ERROR: P2P libraries not available ({e})")
 
 # Resource Agent class
 class ResourceAgent:
