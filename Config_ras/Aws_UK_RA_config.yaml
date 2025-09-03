@@ -4,7 +4,7 @@ credentials:
   provider: "aws"
   access_key: "YOUR_AWS_ACCESS_KEY"
   secret_key: "YOUR_AWS_SECRET_KEY"
-api_port: 8001
-p2p_port: 5001
+api_port: 
+p2p_port: 
 domain: "0.0.0.0"
 bootstrap_peers: [] 
