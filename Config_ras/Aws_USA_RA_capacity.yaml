@@ -1,0 +1,53 @@
+metadata:
+  capacity-id: "aws-usa-ra"
+  description: "AWS EC2 instance in Virginia"
+  capacity-provider: "ACME"
+  resource-provider: "Amazon"
+  type: "cloud"
+capacity:
+  instances:
+    tiny:
+      num-cpus: 2
+      mem-size: "8 GB"
+      disk-size: "100 GB"
+    small:
+      num-cpus: 4
+      mem-size: "16 GB"
+      disk-size: "200 GB"
+    large:
+      num-cpus: 8
+      mem-size: "32 GB"
+      disk-size: "400 GB"
+    xlarge:
+      num-cpus: 16
+      mem-size: "64 GB"
+      disk-size: "800 GB"
+  instances_quota:
+    tiny: 8
+    small: 5
+    large: 8
+    xlarge: 3
+credentials:
+  access_key: "YOUR_AWS_ACCESS_KEY"
+  secret_key: "YOUR_AWS_SECRET_KEY"
+pricing:
+  tiny: 0.4
+  small: 0.8
+  large: 1.6
+  xlarge: 3.2
+locality:
+  continent: "North America"  # Changed from North America
+  country: "USA"        # Changed from USA
+  city: "Virginia"   # Changed from Virginia
+system:
+  os:
+    type: linux
+    distribution: ubuntu
+    version: "22.04"    # Changed to match resource2
+  supported-architecture:
+    x86: yes
+    arm: yes
+energy:
+  energy-type: "Mix"     # Changed from Green
+  powered-type: "Mains"  # Changed from Battery
+  consumption: 95
