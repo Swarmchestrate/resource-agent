@@ -1,0 +1,53 @@
+metadata:
+  capacity-id: "aws-uk-ra"
+  description: "AWS EC2 instance in London"
+  capacity-provider: "ACME"
+  resource-provider: "Amazon"
+  type: "cloud"
+capacity:
+  instances:          # Definition of VMs
+    tiny:
+      num-cpus: 2
+      mem-size: 8 GB
+      disk-size: 200 GB
+    small:
+      num-cpus: 4
+      mem-size: 16 GB
+      disk-size: 400 GB
+    large:
+      num-cpus: 8
+      mem-size: 32 GB
+      disk-size: 800 GB
+    xlarge:
+      num-cpus: 16
+      mem-size: 64 GB
+      disk-size: 1600 GB
+  instances_quota:      # Quota, meaning, how many of VMs of each type is supported by this capacity
+    tiny: 5
+    small: 5
+    large: 5
+    xlarge: 2
+credentials:
+  access_key: "YOUR_AWS_ACCESS_KEY"
+  secret_key: "YOUR_AWS_SECRET_KEY"
+pricing:
+  tiny: 0.5  # credit/hr
+  small: 0.9      # credit/hr
+  large: 1.8      # credit/hr
+  xlarge: 3.6      # credit/hr
+locality:
+    continent: Europe
+    country: UK
+    city: London
+system: 
+  os:
+    type: linux
+    distribution: ubuntu
+    version: "22.04"
+  supported-architecture:
+    x86: yes
+    arm: yes
+energy:
+    energy-type: Green      # enumeration of valid types. 
+    powered-type: Battery     # enumeration of valid types.
+    consumption: 90        # unit here

@@ -1,0 +1,19 @@
+##########################################################################
+# This file contains MiCADO Profile type definitions.
+##########################################################################
+
+tosca_definitions_version: tosca_2_0
+
+profile: eu.swarmchestrate.micado:0.1
+
+metadata:
+  template_name: profile.yaml
+  template_author: University of Westminster
+  template_version: 0.1
+
+description: MiCADO Profile type definitions
+
+imports:
+
+  - node_types.yaml
+  - data_types.yaml

@@ -1,0 +1,11 @@
+RA_id: "SZTAKI-RA"
+universe_id: "swarmchestrate_universe"
+credentials:
+  provider: "sztaki"
+  access_key: "YOUR_SZTAKI_ACCESS_KEY"
+  secret_key: "YOUR_SZTAKI_SECRET_KEY"
+api_port: 8003
+p2p_port: 5003
+domain: "0.0.0.0"
+bootstrap_peers:
+  - "35.179.157.83:5001"  # Connect to AWS UK RA

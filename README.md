@@ -1,109 +1,74 @@
-#  Swarmchestrate - Resource Agent
+# Swarmchestrate Resource Agent
 
-A P2P-based resource agent for distributed computing that broadcasts resource requirements and matches them with available capacity.
-
-## Features
-
-- **Direct ask.yaml Broadcasting**: Broadcast resource requirements without TOSCA validation
-- **P2P Network Communication**: Peer-to-peer resource discovery and communication
-- **Resource Matching**: Binary resource matching system for VM requirements
-- **FastAPI Interface**: RESTful API for resource management
-- **Real-time Resource Discovery**: Automatic peer discovery and connection management
-
-## Quick Start
-
-1. **Install Dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Start the Resource Agent:**
-   ```bash
-   python src/main.py --config config/config.yaml
-   ```
-
-3. **Test Broadcasting:**
-   ```bash
-   python test_broadcast_file.py
-   ```
-
-4. **Test Endpoints:**
-   ```bash
-   python test_endpoints.py
-   ```
+A peer-to-peer (P2P) network of Resource Agents (RAs) representing different cloud VMs that can evaluate TOSCA resource requirements and provide resource bids.
 
 ## Architecture
 
-### **Core Components:**
-- **`src/main.py`**: Application entry point and FastAPI server startup
-- **`src/ra_core.py`**: Core Resource Agent logic with P2P and message handling
-- **`src/config.py`**: Configuration loading and management
-- **`src/capacity_loader.py`**: Loads capacity profiles from YAML files
+This system consists of:
+- **Resource Agents (RAs)**: Python-based agents representing cloud VMs (AWS UK, AWS USA, SZTAKI)
+- **P2P Network**: Using `Swarmchestrate/lib_comm` for peer-to-peer communication
+- **Job Submission Client**: Submits TOSCA `ask.yaml` files to the network
+- **YES/NO Evaluation**: RAs evaluate requirements and respond with binary yes/no answers
+- **Resource Bidding**: For "yes" responses, RAs provide detailed bid information
 
-### **API Layer:**
-- **`src/api/endpoints.py`**: FastAPI endpoints including `/broadcast-ask` and `/submit`
-- **`src/api/__init__.py`**: API package initialization
+## Quick Start
 
-### **Utility Modules:**
-- **`src/utils/resource_offer_system.py`**: Manages resource requests and broadcasting
-- **`src/utils/binary_resource_matcher.py`**: Matches VM requirements with RA capacity
-- **`src/utils/helpers.py`**: General utility functions
+### Prerequisites
+- Python 3.12+
+- Virtual environment
 
+### Installation
 
-### **Configuration:**
-- **`config/config.yaml`**: Main RA configuration
-- **`config/capacity_profiles.yaml`**: RA capacity definitions
-
-### **TOSCA Files:**
-- **`tosca/outputs/ask.yaml`**: Resource requirements definition 
-
-## API Endpoints
-
-### **Core Endpoints:**
-- `GET /`: Root endpoint with basic info
-- `GET /status`: Get RA status and configuration
-- `GET /health`: Health check endpoint
-- `GET /p2p/status`: Get P2P network status and connected peers
-
-### **Resource Management:**
-- `POST /broadcast-ask`: **Directly broadcast ask.yaml requirements** 
-
-### **Application Management:**
-- `GET /applications/{reservation_id}`: Get application status
-- `PUT /applications/{reservation_id}`: Update application
-- `DELETE /applications/{reservation_id}`: Delete application
-
-## Resource Broadcasting Workflow
-
-1. **User runs:** `python test_broadcast_file.py`
-2. **Script calls:** `POST /broadcast-ask` endpoint
-3. **RA loads:** `tosca/outputs/ask.yaml` directly
-4. **Requirements extracted:** VM specifications, counts, metadata
-5. **P2P broadcast:** Message sent to all connected peers (e.g., Aws-RA2)
-6. **Remote RAs process:** Resource matching and offer generation
-7. **Results returned:** Resource availability and offers
-
-
-## Testing
-
-### **Test Scripts:**
-- **`test_broadcast_file.py`**: Tests direct ask.yaml broadcasting
-- **`test_endpoints.py`**: Tests all available API endpoints
-
-### **Expected Output:**
-```
- Testing Direct ask.yaml Broadcasting (No TOSCA Validation)
-================================================================================
- RA Status: 200
- Response: {'ra_id': 'ra-local', 'status': 'running', 'p2p_available': True}
- ask.yaml requirements broadcasted successfully!
- RA ID: ra-local
- Broadcast Status: broadcasted_to_p2p_network
- Broadcast Message: ask.yaml requirements broadcasted to all peers
- Received resource request from ra-local
- Processing 2 VM requirements
- Evaluating vm1 (count: 3)
- CAN or CAN'T fulfill the resource request
+1. Create and activate virtual environment:
+```bash
+python -m venv ra_env
+source ra_env/bin/activate  # On Windows: ra_env\Scripts\activate
 ```
 
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
+### Running Resource Agents
+
+1. **AWS UK RA (Hub)**:
+```bash
+python src/aws_uk_ra.py
+```
+
+2. **AWS US RA**:
+```bash
+python src/aws_us_ra.py
+```
+
+3. **SZTAKI RA**:
+```bash
+python src/sztaki_ra.py
+```
+
+### Submitting Jobs
+
+Run the job submission client:
+```bash
+python src/job_submission_client.py
+```
+
+## Configuration
+
+Resource Agent configurations are stored in `Config_ras/`:
+- `Aws_UK_RA_config.yaml` / `Aws_UK_RA_capacity.yaml`
+- `Aws_US_RA_config.yaml` / `Aws_USA_RA_capacity.yaml`
+- `Sztaki_RA_config.yaml` / `SZTAKI_RA_capacity.yaml`
+
+## TOSCA Requirements
+
+Example `ask.yaml` files are in `tosca/outputs/` showing resource requirements that RAs can evaluate.
+
+## Network Topology
+
+- **AWS UK RA**: Acts as the bootstrap hub (port ---)
+- **AWS US RA**: Connects to UK hub (port ---)
+- **SZTAKI RA**: Connects to UK hub (port ---)
+
+The system automatically handles message chunking for large TOSCA files and compiles valid resource combinations from RA responses.

@@ -1,0 +1,53 @@
+metadata:
+  capacity-id: "sztaki-ra"
+  description: "SZTAKI Edge instance in Madrid"
+  capacity-provider: "ACME"
+  resource-provider: "Openstack"
+  type: "edge"
+capacity:
+  instances:
+    tiny:
+      num-cpus: 2
+      mem-size: 8 GB
+      disk-size: 100 GB
+    small:
+      num-cpus: 4
+      mem-size: 16 GB
+      disk-size: 200 GB
+    large:
+      num-cpus: 8
+      mem-size: 32 GB
+      disk-size: 800 GB
+    xlarge:
+      num-cpus: 16
+      mem-size: 64 GB
+      disk-size: 1600 GB
+  instances_quota:
+    tiny: 3
+    small: 4
+    large: 3
+    xlarge: 1
+credentials:
+  access_key: "YOUR_SZTAKI_ACCESS_KEY"
+  secret_key: "YOUR_SZTAKI_SECRET_KEY"
+pricing:
+  tiny: 0.3
+  small: 0.7
+  large: 1.4
+  xlarge: 2.8
+locality:
+  continent: Europe
+  country: Spain
+  city: Madrid
+system:
+  os:
+    type: linux
+    distribution: ubuntu
+    version: "22.04"
+  supported-architecture:
+    x86: yes
+    arm: no
+energy:
+  energy-type: Mix
+  powered-type: Mains
+  consumption: 150

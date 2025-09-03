@@ -1,0 +1,33 @@
+tosca_definitions_version: tosca_2_0
+
+description: stressng on Swarmchestrate
+
+imports:
+  - profile: eu.swarmchestrate:2.0
+    namespace: swch
+
+service_template:
+
+  node_templates:
+
+    swarm:
+      type: swch:Swarm
+      directives:
+      - substitute
+
+    stressng:
+      type: swch:Application
+      properties:
+        image: lorel/docker-stress-ng
+        args: ['--cpu', '0', '--cpu-method', 'pi', '-l', '20']
+      requirements:
+      - host:
+          node_filter:
+            $and:
+              - $equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, num-cpus ]
+                  - 4
+              - $equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, locality, city ]
+                  - london
+        

@@ -1,0 +1,327 @@
+"""
+Capability Evaluator for Resource Agent System
+Compares ask.yaml requirements with capacity.yaml capabilities
+"""
+
+import re
+from typing import Dict, Any, List, Optional
+
+
+def can_fulfill_requirement(ask_requirements: dict, capacity_data: dict) -> bool:
+    """
+    Check if capacity can fulfill ask requirements.
+    Returns True if ALL requirements can be met, False otherwise.
+    """
+    capabilities = ask_requirements.get('capabilities', {})
+    
+    for category, category_data in capabilities.items():
+        if not isinstance(category_data, dict):
+            continue
+            
+        properties = category_data.get('properties', {})
+        if not properties:
+            continue
+        
+        if not check_category_requirements(category, properties, capacity_data):
+            return False
+    
+    return True
+
+
+def check_category_requirements(category: str, properties: dict, capacity_data: dict) -> bool:
+    """Check all properties in a category against capacity"""
+    
+    if category == 'host':
+        instances = find_in_capacity(capacity_data, ['capacity.instances', 'instances'])
+        if not instances:
+            return False
+            
+        for instance_name, instance_data in instances.items():
+            if check_instance_requirements(properties, instance_data, capacity_data):
+                return True
+        return False
+    
+    else:
+        for prop_key, prop_value in properties.items():
+            if not check_property_anywhere(category, prop_key, prop_value, capacity_data):
+                return False
+        return True
+
+
+def check_instance_requirements(requirements: dict, instance_data: dict, capacity_data: dict) -> bool:
+    """Check if an instance meets all requirements"""
+    
+    for req_key, req_value in requirements.items():
+        if req_key == 'cpu-architecture':
+            if not check_architecture_requirement(req_value, capacity_data):
+                return False
+        
+        elif req_key == 'num-cpus':
+            instance_cpus = instance_data.get('num-cpus', 0)
+            if isinstance(req_value, dict):
+                if '$in_range' in req_value:
+                    min_cpu, max_cpu = req_value['$in_range']
+                    if not (min_cpu <= instance_cpus <= max_cpu):
+                        return False
+                elif not check_value(req_value, instance_cpus):
+                    return False
+            elif instance_cpus != req_value:
+                return False
+        
+        elif req_key == 'mem-size':
+            instance_mem = parse_number(instance_data.get('mem-size', 0))
+            if isinstance(req_value, dict):
+                if '$greater_or_equal' in req_value:
+                    min_mem = parse_number(req_value['$greater_or_equal'])
+                    if instance_mem < min_mem:
+                        return False
+                elif not check_value(req_value, instance_mem):
+                    return False
+            else:
+                # Plain number is treated as minimum
+                min_mem = parse_number(req_value)
+                if instance_mem < min_mem:
+                    return False
+        
+        elif req_key == 'disk-size':
+            instance_disk = parse_number(instance_data.get('disk-size', 0))
+            if isinstance(req_value, dict):
+                if '$greater_or_equal' in req_value:
+                    min_disk = parse_number(req_value['$greater_or_equal'])
+                    if instance_disk < min_disk:
+                        return False
+                elif not check_value(req_value, instance_disk):
+                    return False
+            else:
+                # Plain number is treated as minimum
+                min_disk = parse_number(req_value)
+                if instance_disk < min_disk:
+                    return False
+        
+        else:
+            # Other properties
+            instance_value = instance_data.get(req_key)
+            if not check_value(req_value, instance_value):
+                return False
+    
+    return True
+
+
+def check_property_anywhere(category: str, prop_key: str, prop_value, capacity_data: dict) -> bool:
+    """Find and check a property anywhere in capacity data"""
+    
+    search_paths = {
+        'os': ['system.os', 'os', 'system'],
+        'resource': ['metadata', 'meta'],
+        'pricing': ['pricing', 'costs', 'price'],
+        'locality': ['locality', 'location', 'region'],
+        'energy': ['energy', 'power']
+    }
+    
+    paths = search_paths.get(category, [category])
+    
+    for path in paths:
+        section = find_in_capacity(capacity_data, [path])
+        if section and isinstance(section, dict):
+            # Special handling for pricing
+            if category == 'pricing' and prop_key == 'cost':
+                # Check if any instance price meets requirement
+                if isinstance(prop_value, dict) and '$less_or_equal' in prop_value:
+                    max_cost = parse_number(prop_value['$less_or_equal'])
+                    for instance_type, price in section.items():
+                        if parse_number(price) <= max_cost:
+                            return True
+                    return False
+            
+            # Try exact key
+            if prop_key in section:
+                if check_value(prop_value, section[prop_key]):
+                    return True
+            
+            # Try variations of the key
+            for key_variant in get_key_variations(prop_key):
+                if key_variant in section:
+                    if check_value(prop_value, section[key_variant]):
+                        return True
+            
+            # For resource category, try prefixed keys
+            if category == 'resource':
+                prefixed_keys = [
+                    f'resource-{prop_key}',
+                    f'capacity-{prop_key}',
+                    f'{category}-{prop_key}'
+                ]
+                for prefixed in prefixed_keys:
+                    if prefixed in section:
+                        if check_value(prop_value, section[prefixed]):
+                            return True
+    
+    return False
+
+
+def check_architecture_requirement(required: str, capacity_data: dict) -> bool:
+    """Check architecture requirement against capacity"""
+    
+    arch_locations = [
+        'system.supported-architecture',
+        'system.supported_architecture',
+        'system.architecture',
+        'hardware.architecture',
+        'system.arch'
+    ]
+    
+    for location in arch_locations:
+        arch_data = find_in_capacity(capacity_data, [location])
+        if arch_data:
+            if isinstance(arch_data, dict):
+                if check_architecture_dict(required, arch_data):
+                    return True
+            elif isinstance(arch_data, list):
+                if check_architecture_list(required, arch_data):
+                    return True
+            elif isinstance(arch_data, str):
+                if check_architecture_string(required, arch_data):
+                    return True
+    
+    return False
+
+
+def check_architecture_dict(required: str, arch_dict: dict) -> bool:
+    """Check architecture against dict format {x86: yes}"""
+    if required in arch_dict:
+        value = arch_dict[required]
+        return value in ['yes', True, 'true', 1, 'Yes', 'TRUE']
+    
+    required_base = required.lower().replace('_64', '').replace('64', '').replace('-', '').replace('_', '')
+    for key, value in arch_dict.items():
+        key_base = key.lower().replace('_64', '').replace('64', '').replace('-', '').replace('_', '')
+        if required_base == key_base:
+            return value in ['yes', True, 'true', 1, 'Yes', 'TRUE']
+    
+    return False
+
+
+def check_architecture_list(required: str, arch_list: list) -> bool:
+    """Check architecture against list format ["x86_64", "amd64"]"""
+    if required in arch_list:
+        return True
+    
+    required_base = required.lower().replace('_64', '').replace('64', '').replace('-', '').replace('_', '')
+    for arch in arch_list:
+        arch_base = arch.lower().replace('_64', '').replace('64', '').replace('-', '').replace('_', '')
+        if required_base == arch_base:
+            return True
+    
+    return False
+
+
+def check_architecture_string(required: str, arch_str: str) -> bool:
+    """Check architecture against string format"""
+    if required.lower() == arch_str.lower():
+        return True
+    
+    required_base = required.lower().replace('_64', '').replace('64', '').replace('-', '').replace('_', '')
+    arch_base = arch_str.lower().replace('_64', '').replace('64', '').replace('-', '').replace('_', '')
+    return required_base == arch_base
+
+
+def get_key_variations(key: str) -> list:
+    """Get variations of a key (hyphen vs underscore)"""
+    variations = [key]
+    if '-' in key:
+        variations.append(key.replace('-', '_'))
+    if '_' in key:
+        variations.append(key.replace('_', '-'))
+    return variations
+
+
+def find_in_capacity(capacity_data: dict, paths: list):
+    """Find a value in capacity data using dot notation paths"""
+    for path in paths:
+        if '.' in path:
+            keys = path.split('.')
+            current = capacity_data
+            for key in keys:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                else:
+                    current = None
+                    break
+            if current is not None:
+                return current
+        else:
+            if path in capacity_data:
+                return capacity_data[path]
+    
+    return None
+
+
+def check_value(requirement, capacity_value) -> bool:
+    """Check if a capacity value meets a requirement"""
+    if requirement is None:
+        return True
+    
+    if capacity_value is None:
+        return False
+    
+    if isinstance(requirement, dict):
+        for operator, expected in requirement.items():
+            if operator == '$in':
+                if not isinstance(expected, list):
+                    return capacity_value == expected
+                if capacity_value not in expected:
+                    return False
+            elif operator == '$in_range':
+                if len(expected) == 2:
+                    num_val = parse_number(capacity_value)
+                    if not (expected[0] <= num_val <= expected[1]):
+                        return False
+            elif operator == '$greater_or_equal':
+                if parse_number(capacity_value) < parse_number(expected):
+                    return False
+            elif operator == '$less_or_equal':
+                if parse_number(capacity_value) > parse_number(expected):
+                    return False
+            elif operator == '$greater_than':
+                if parse_number(capacity_value) <= parse_number(expected):
+                    return False
+            elif operator == '$less_than':
+                if parse_number(capacity_value) >= parse_number(expected):
+                    return False
+        return True
+    
+    if isinstance(requirement, str) and isinstance(capacity_value, str):
+        return requirement.lower() == capacity_value.lower()
+    
+    return requirement == capacity_value
+
+
+def parse_number(value) -> float:
+    """Extract numeric value from strings like '16 GB' or '100 W'"""
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    if isinstance(value, str):
+        match = re.search(r'(-?\d+\.?\d*)', value)
+        if match:
+            return float(match.group(1))
+    
+    return 0
+
+
+def get_matching_instances(capabilities: dict, capacity_data: dict) -> List[str]:
+    """Get list of instances that match host requirements"""
+    instances = capacity_data.get('capacity', {}).get('instances', {})
+    if not instances:
+        return []
+    
+    host_props = capabilities.get('host', {}).get('properties', {})
+    if not host_props:
+        return list(instances.keys())
+    
+    matching = []
+    for instance_name, instance_data in instances.items():
+        if check_instance_requirements(host_props, instance_data, capacity_data):
+            matching.append(instance_name)
+    
+    return matching
