@@ -2,21 +2,6 @@
 
 A peer-to-peer (P2P) network of Resource Agents (RAs) representing different cloud VMs that can evaluate TOSCA resource requirements and provide resource bids.
 
-## Architecture
-┌──────────────┐
-│   Client  │
-└──────┬───────┘
-       │ Submit ask.yaml
-       ▼
-┌──────────────┐     <== Broadcast==>      ┌──────────────┐
-│  AWS-UK-RA   │◄────────────────────►│  AWS-USA-RA  │
-│    (Hub)     │                      │              │
-└──────┬───────┘                      └──────────────┘
-       │              Broadcast==>            ▲
-       └──────────────────────────────────────┤
-                                      ┌──────────────┐
-                                      │  SZTAKI-RA   │
-                                      └──────────────┘
 
 ## Quick Start
 
