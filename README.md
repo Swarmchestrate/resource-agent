@@ -41,9 +41,9 @@ python src/sztaki_ra.py
 
 ### Submitting Jobs
 
-Run the job submission client:
+Run the submit application requirements:
 ```bash
-python src/job_submission_client.py
+python job_submission_client.py tosca/outputs/ask.yaml
 ```
 
 ## Configuration
@@ -63,4 +63,3 @@ Example `ask.yaml` files are in `tosca/outputs/` showing resource requirements t
 - **AWS US RA**: Connects to UK hub (port ---)
 - **SZTAKI RA**: Connects to UK hub (port ---)
 
-The system automatically handles message chunking for large TOSCA files and compiles valid resource combinations from RA responses.
