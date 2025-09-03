@@ -41,10 +41,10 @@ class JobSubmissionClient:
         if not ask_data:
             return False
         
-        print("🚀 Swarmchestrate Job Submission Client")
+        print(" Swarmchestrate Job Submission Client")
         print("=" * 60)
-        print(f"📄 Loading ask.yaml: {ask_yaml_path}")
-        print(f"🎯 Found {len(ask_data)} VM requests")
+        print(f" Loading ask.yaml: {ask_yaml_path}")
+        print(f" Found {len(ask_data)} VM requests")
         
         # Initialize P2P client
         self.peer = SwchPeer(
@@ -58,16 +58,16 @@ class JobSubmissionClient:
         self.peer.register_message_handler("MSG_JOB_RESULT", self._handle_job_result)
         
         def on_entered():
-            print(f"✅ Connected to P2P network via hub {hub_host}:{hub_port}")
+            print(f" Connected to P2P network via hub {hub_host}:{hub_port}")
             
             # Find hub RA
             hub_ras = self.peer.find_peers({"peer_type": "RA", "ra_id": "Aws-UK-RA"})
             if not hub_ras:
-                print("❌ Hub RA not found!")
+                print(" Hub RA not found!")
                 return
             
             hub_ra_id = hub_ras[0]
-            print(f"🎯 Found hub RA: {hub_ra_id}")
+            print(f" Found hub RA: {hub_ra_id}")
             
                         # Check message size and split if needed
             import json
@@ -80,10 +80,10 @@ class JobSubmissionClient:
             }
             
             message_size = len(json.dumps(job_message, default=str))
-            print(f"📏 Message size: {message_size} bytes")
+            print(f" Message size: {message_size} bytes")
             
             if message_size > 2000:  # P2P limit appears to be ~2400 bytes
-                print("⚠️  Message too large, splitting resources...")
+                print("⚠  Message too large, splitting resources...")
                 
                 # Send resources in smaller chunks
                 for resource_name, resource_data in ask_data.items():
@@ -96,15 +96,15 @@ class JobSubmissionClient:
                         "total_resources": len(ask_data)
                     }
                     
-                    print(f"📡 Broadcasting {resource_name} to hub...")
+                    print(f" Broadcasting {resource_name} to hub...")
                     self.peer.send(hub_ra_id, "MSG_JOB_SUBMIT", chunk_message)
                     time.sleep(0.1)  # Small delay between chunks
             else:
-                print("📡 Broadcasting complete job to hub...")
+                print(" Broadcasting complete job to hub...")
                 self.peer.send(hub_ra_id, "MSG_JOB_SUBMIT", job_message)
             
             # Wait for responses
-            print("⏳ Waiting for resource offers from RAs...")
+            print(" Waiting for resource offers from RAs...")
             
         try:
             self.peer.enter(hub_host, hub_port).addCallback(lambda _: on_entered())
@@ -116,7 +116,7 @@ class JobSubmissionClient:
     
     def _handle_resource_response(self, peer_id, message):
         """Handle YES/NO resource responses from RAs"""
-        print(f"📋 Resource response received from {peer_id}")
+        print(f" Resource response received from {peer_id}")
         
         job_id = message.get('job_id')
         ra_id = message.get('ra_id')
@@ -131,15 +131,15 @@ class JobSubmissionClient:
             'responses': responses
         }
         
-        print(f"   🏢 RA: {ra_id} ({provider})")
+        print(f"    RA: {ra_id} ({provider})")
         for resource_name, response in responses.items():
             answer = response.get('answer', 'unknown')
             if answer == 'yes':
                 cost = response.get('bid', {}).get('cost_per_hour', 'N/A')
-                print(f"      ✅ {resource_name}: YES (Cost: {cost} credits/hr)")
+                print(f"       {resource_name}: YES (Cost: {cost} credits/hr)")
             else:
                 reason = response.get('reason', 'No reason provided')
-                print(f"      ❌ {resource_name}: NO ({reason})")
+                print(f"       {resource_name}: NO ({reason})")
         
         # Check if we have responses from all RAs
         all_ras = self.peer.find_peers({"peer_type": "RA"})
@@ -148,13 +148,13 @@ class JobSubmissionClient:
     
     def _compile_valid_combinations(self, job_id):
         """Compile all possible valid resource combinations"""
-        print("\n🔄 Compiling all possible resource offers...")
+        print("\n Compiling all possible resource offers...")
         print("=" * 60)
         
         ra_responses = self.job_responses.get(job_id, {})
         
         # Display all responses in a table format
-        print("📊 Response Summary:")
+        print(" Response Summary:")
         print("-" * 60)
         
         # Get all resource names from ask.yaml
@@ -165,7 +165,7 @@ class JobSubmissionClient:
                 break
         
         if not ask_data:
-            print("❌ No resource requirements found")
+            print(" No resource requirements found")
             return
         
         # Create response matrix - dynamic columns
@@ -186,14 +186,14 @@ class JobSubmissionClient:
                 row += f"{answer}"[:14].ljust(15)
             print(row)
         
-        print("\n🔍 Finding valid resource combinations...")
+        print("\n Finding valid resource combinations...")
         print("=" * 60)
         
         # Find all valid combinations
         valid_combinations = self._find_valid_combinations(ra_responses, ask_data)
         
         if valid_combinations:
-            print(f"✅ Found {len(valid_combinations)} valid combination(s):")
+            print(f" Found {len(valid_combinations)} valid combination(s):")
             print("-" * 60)
             
             for i, combination in enumerate(valid_combinations, 1):
@@ -209,7 +209,7 @@ class JobSubmissionClient:
                     
                     print(f"  • {resource_name}: {ra_id} ({provider}) - {cost} credits/hr × {count}")
                 
-                print(f"  💰 Total Cost: {total_cost:.2f} credits/hr")
+                print(f"   Total Cost: {total_cost:.2f} credits/hr")
                 print()
         else:
             print("❌ No valid combinations found!")
