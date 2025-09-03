@@ -3,13 +3,20 @@
 A peer-to-peer (P2P) network of Resource Agents (RAs) representing different cloud VMs that can evaluate TOSCA resource requirements and provide resource bids.
 
 ## Architecture
-
-This system consists of:
-- **Resource Agents (RAs)**: Python-based agents representing cloud VMs (AWS UK, AWS USA, SZTAKI)
-- **P2P Network**: Using `Swarmchestrate/lib_comm` for peer-to-peer communication
-- **Job Submission Client**: Submits TOSCA `ask.yaml` files to the network
-- **YES/NO Evaluation**: RAs evaluate requirements and respond with binary yes/no answers
-- **Resource Bidding**: For "yes" responses, RAs provide detailed bid information
+┌──────────────┐
+│   Client  │
+└──────┬───────┘
+       │ Submit ask.yaml
+       ▼
+┌──────────────┐     <== Broadcast==>      ┌──────────────┐
+│  AWS-UK-RA   │◄────────────────────►│  AWS-USA-RA  │
+│    (Hub)     │                      │              │
+└──────┬───────┘                      └──────────────┘
+       │              Broadcast==>            ▲
+       └──────────────────────────────────────┤
+                                      ┌──────────────┐
+                                      │  SZTAKI-RA   │
+                                      └──────────────┘
 
 ## Quick Start
 
