@@ -41,10 +41,10 @@ class JobSubmissionClient:
         if not ask_data:
             return False
 
-        print("🚀 Swarmchestrate Job Submission Client")
+        print("Swarmchestrate Job Submission Client")
         print("=" * 60)
-        print(f"📄 Loading ask.yaml: {ask_yaml_path}")
-        print(f"🎯 Found {len(ask_data)} VM requests")
+        print(f"Loading ask.yaml: {ask_yaml_path}")
+        print(f"Found {len(ask_data)} VM requests")
 
         # Initialize P2P client
         self.peer = SwchPeer(
@@ -58,16 +58,16 @@ class JobSubmissionClient:
         self.peer.register_message_handler("MSG_JOB_RESULT", self._handle_job_result)
 
         def on_entered():
-            print(f"✅ Connected to P2P network via hub {hub_host}:{hub_port}")
+            print(f" Connected to P2P network via hub {hub_host}:{hub_port}")
 
             # Find hub RA
             hub_ras = self.peer.find_peers({"peer_type": "RA", "ra_id": "Aws-UK-RA"})
             if not hub_ras:
-                print("❌ Hub RA not found!")
+                print(" Hub RA not found!")
                 return
 
             hub_ra_id = hub_ras[0]
-            print(f"🎯 Found hub RA: {hub_ra_id}")
+            print(f"Found hub RA: {hub_ra_id}")
 
             # Submit job to hub for broadcasting
             job_message = {
@@ -78,11 +78,11 @@ class JobSubmissionClient:
                 "action": "broadcast_job"
             }
 
-            print("📡 Broadcasting job to all RAs via hub...")
+            print("Broadcasting job to all RAs via hub...")
             self.peer.send(hub_ra_id, "MSG_JOB_SUBMIT", job_message)
 
             # Wait for responses
-            print("⏳ Waiting for resource offers from RAs...")
+            print("Waiting for resource offers from RAs...")
 
         try:
             self.peer.enter(hub_host, hub_port).addCallback(lambda _: on_entered())
@@ -94,7 +94,7 @@ class JobSubmissionClient:
 
     def _handle_resource_response(self, peer_id, message):
         """Handle YES/NO resource responses from RAs"""
-        print(f"📋 Resource response received from {peer_id}")
+        print(f"Resource response received from {peer_id}")
 
         job_id = message.get('job_id')
         ra_id = message.get('ra_id')
@@ -109,7 +109,7 @@ class JobSubmissionClient:
             'responses': responses
         }
 
-        print(f"   🏢 RA: {ra_id} ({provider})")
+        print(f"    RA: {ra_id} ({provider})")
         for resource_name, response in responses.items():
             answer = response.get('answer', 'unknown')
             if answer == 'yes':
@@ -126,13 +126,13 @@ class JobSubmissionClient:
 
     def _compile_valid_combinations(self, job_id):
         """Compile all possible valid resource combinations"""
-        print("\n🔄 Compiling all possible resource offers...")
+        print("\nCompiling all possible resource offers...")
         print("=" * 60)
 
         ra_responses = self.job_responses.get(job_id, {})
 
         # Display all responses in a table format
-        print("📊 Response Summary:")
+        print("Response Summary:")
         print("-" * 60)
 
         # Get all resource names from ask.yaml
@@ -161,7 +161,7 @@ class JobSubmissionClient:
                   f"{resource1_answer}"[:14].ljust(15) +
                   f"{resource2_answer}"[:14].ljust(15))
 
-        print("\n🔍 Finding valid resource combinations...")
+        print("\nFinding valid resource combinations...")
         print("=" * 60)
 
         # Find all valid combinations
@@ -184,7 +184,7 @@ class JobSubmissionClient:
 
                     print(f"  • {resource_name}: {ra_id} ({provider}) - {cost} credits/hr × {count}")
 
-                print(f"  💰 Total Cost: {total_cost:.2f} credits/hr")
+                print(f"  Total Cost: {total_cost:.2f} credits/hr")
                 print()
         else:
             print("❌ No valid combinations found!")
@@ -221,7 +221,7 @@ class JobSubmissionClient:
         # Check if all resources have at least one provider
         for resource_name, providers in resource_providers.items():
             if not providers:
-                print(f"⚠️  No RA can provide {resource_name}")
+                print(f"No RA can provide {resource_name}")
                 return []
 
         # Generate all possible combinations
