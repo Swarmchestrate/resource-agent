@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-Job Submission Client - Submits ask.yaml to P2P network
-Based on the Swarmchestrate workflow diagram
+Job Submission Client
+Submits resource requests to RA network and compiles responses
 """
 import yaml
 import time
 import logging
 import sys
+import random
 from pathlib import Path
+from itertools import product
 from swchp2pcom import SwchPeer
 
 
 class JobSubmissionClient:
-    """Client that submits TOSCA ask.yaml files to the P2P network"""
+    """Client for submitting jobs and collecting resource offers"""
 
     def __init__(self, client_id="job-client"):
         self.client_id = client_id
@@ -20,56 +22,77 @@ class JobSubmissionClient:
         self.job_responses = {}
         self.job_complete = False
 
-        # Setup logging
-        logging.basicConfig(level=logging.INFO)
+        # Setup minimal logging
+        logging.basicConfig(level=logging.WARNING)
         self.logger = logging.getLogger(f"JobClient-{client_id}")
 
     def load_ask_yaml(self, file_path):
-        """Load ask.yaml file"""
+        """Load ask.yaml file with path resolution"""
         try:
-            with open(file_path, 'r') as f:
-                return yaml.safe_load(f)
+            path = Path(file_path)
+            
+            # Resolve relative paths when running from src directory
+            if Path.cwd().name == 'src' and not path.is_absolute() and not str(file_path).startswith('../'):
+                path = Path("../") / file_path
+            
+            if not path.exists():
+                print(f"File not found: {path.resolve()}")
+                return None
+            
+            with open(path, 'r') as f:
+                yaml_data = yaml.safe_load(f)
+                
+            if yaml_data:
+                print(f"Loaded {len(yaml_data)} resource requests from ask.yaml")
+                # Generate resource summary
+                resource_details = []
+                for name, data in yaml_data.items():
+                    count = data.get('count', 1) if isinstance(data, dict) else 1
+                    capabilities = data.get('capabilities', {}) if isinstance(data, dict) else {}
+                    category_count = len(capabilities)
+                    resource_details.append(f"{name}(×{count}, {category_count} requirements)")
+                print(f"📋 Resources: {', '.join(resource_details)}")
+            else:
+                print("YAML data is None or empty")
+                
+            return yaml_data
+            
         except Exception as e:
-            self.logger.error(f"Failed to load ask.yaml: {e}")
+            print(f"Failed to load ask.yaml: {e}")
             return None
 
-    def submit_job(self, ask_yaml_path, hub_host="", hub_port=):
-        """Submit job to P2P network via hub"""
-
-        # Load ask.yaml
+    def submit_job(self, ask_yaml_path, hub_host="35.179.157.83", hub_port=5001):
+        """Submit job to RA network via hub"""
         ask_data = self.load_ask_yaml(ask_yaml_path)
         if not ask_data:
             return False
 
         print("Swarmchestrate Job Submission Client")
         print("=" * 60)
-        print(f"Loading ask.yaml: {ask_yaml_path}")
-        print(f"Found {len(ask_data)} VM requests")
 
         # Initialize P2P client
         self.peer = SwchPeer(
             peer_id=self.client_id,
             enable_rejoin=False,
-            metadata={"peer_type": "JOB_CLIENT"}
+            metadata={"peer_type": "JOB_CLIENT", "client_id": self.client_id}
         )
 
-        # Register message handlers
+        # Register response handler
         self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
-        self.peer.register_message_handler("MSG_JOB_RESULT", self._handle_job_result)
 
         def on_entered():
-            print(f" Connected to P2P network via hub {hub_host}:{hub_port}")
+            print(f"Connected to hub {hub_host}:{hub_port}")
 
             # Find hub RA
             hub_ras = self.peer.find_peers({"peer_type": "RA", "ra_id": "Aws-UK-RA"})
             if not hub_ras:
-                print(" Hub RA not found!")
+                print("Hub RA (Aws-UK-RA) not found!")
                 return
 
             hub_ra_id = hub_ras[0]
-            print(f"Found hub RA: {hub_ra_id}")
+            print(f"Connected to hub: {hub_ra_id}")
 
-            # Submit job to hub for broadcasting
+            # Create job submission message
             job_message = {
                 "job_id": f"job_{int(time.time())}",
                 "client_id": self.client_id,
@@ -78,11 +101,9 @@ class JobSubmissionClient:
                 "action": "broadcast_job"
             }
 
-            print("Broadcasting job to all RAs via hub...")
+            print("📡 Broadcasting job to all RAs...")
             self.peer.send(hub_ra_id, "MSG_JOB_SUBMIT", job_message)
-
-            # Wait for responses
-            print("Waiting for resource offers from RAs...")
+            print("Waiting for responses...")
 
         try:
             self.peer.enter(hub_host, hub_port).addCallback(lambda _: on_entered())
@@ -93,9 +114,7 @@ class JobSubmissionClient:
             return False
 
     def _handle_resource_response(self, peer_id, message):
-        """Handle YES/NO resource responses from RAs"""
-        print(f"Resource response received from {peer_id}")
-
+        """Process resource response from RA"""
         job_id = message.get('job_id')
         ra_id = message.get('ra_id')
         provider = message.get('provider')
@@ -109,104 +128,109 @@ class JobSubmissionClient:
             'responses': responses
         }
 
-        print(f"    RA: {ra_id} ({provider})")
-        for resource_name, response in responses.items():
-            answer = response.get('answer', 'unknown')
-            if answer == 'yes':
-                cost = response.get('bid', {}).get('cost_per_hour', 'N/A')
-                print(f"      ✅ {resource_name}: YES (Cost: {cost} credits/hr)")
-            else:
-                reason = response.get('reason', 'No reason provided')
-                print(f"      ❌ {resource_name}: NO ({reason})")
-
-        # Check if we have responses from all RAs
+        # Check if all RAs have responded
         all_ras = self.peer.find_peers({"peer_type": "RA"})
         if len(self.job_responses.get(job_id, {})) >= len(all_ras):
-            self._compile_valid_combinations(job_id)
+            self._compile_and_display_results(job_id)
 
-    def _compile_valid_combinations(self, job_id):
-        """Compile all possible valid resource combinations"""
-        print("\nCompiling all possible resource offers...")
+    def _compile_and_display_results(self, job_id):
+        """Compile and display resource allocation results"""
+        print("\nCompiling resource offers...")
         print("=" * 60)
 
         ra_responses = self.job_responses.get(job_id, {})
 
-        # Display all responses in a table format
-        print("Response Summary:")
-        print("-" * 60)
-
-        # Get all resource names from ask.yaml
-        ask_data = None
+        # Extract all resource names from responses
+        all_resource_names = set()
         for ra_id, ra_data in ra_responses.items():
             if ra_data['responses']:
-                ask_data = list(ra_data['responses'].keys())
-                break
+                all_resource_names.update(ra_data['responses'].keys())
 
-        if not ask_data:
-            print("❌ No resource requirements found")
+        if not all_resource_names:
+            print("No resource requirements found")
             return
 
-        # Create response matrix
-        print(f"{'RA (Provider)':<20} {'Resource1':<15} {'Resource2':<15}")
+        # Display response matrix
+        resource_names = sorted(all_resource_names)
+        
+        print("Response Summary:")
         print("-" * 60)
+        
+        # Create table header
+        header = f"{'RA (Provider)':<20}"
+        for resource_name in resource_names:
+            header += f"{resource_name.title():<15}"
+        print(header)
+        print("-" * (20 + len(resource_names) * 15))
 
+        # Create table rows
         for ra_id, ra_data in ra_responses.items():
             provider = ra_data['provider']
             responses = ra_data['responses']
 
-            resource1_answer = responses.get('resource1', {}).get('answer', 'N/A')
-            resource2_answer = responses.get('resource2', {}).get('answer', 'N/A')
+            row = f"{ra_id} ({provider})"[:19].ljust(20)
+            for resource_name in resource_names:
+                answer = responses.get(resource_name, {}).get('answer', 'N/A')
+                row += f"{answer}"[:14].ljust(15)
+            print(row)
 
-            print(f"{ra_id} ({provider})"[:19].ljust(20) +
-                  f"{resource1_answer}"[:14].ljust(15) +
-                  f"{resource2_answer}"[:14].ljust(15))
-
-        print("\nFinding valid resource combinations...")
+        print("\nFinding valid combinations...")
         print("=" * 60)
 
-        # Find all valid combinations
-        valid_combinations = self._find_valid_combinations(ra_responses, ask_data)
+        # Find feasible resource combinations
+        valid_combinations = self._find_valid_combinations(ra_responses, resource_names)
 
         if valid_combinations:
-            print(f"✅ Found {len(valid_combinations)} valid combination(s):")
+            print(f"Found {len(valid_combinations)} valid combination(s):")
             print("-" * 60)
-
+            print("Possible offers:")
+            
             for i, combination in enumerate(valid_combinations, 1):
-                print(f"Combination {i}:")
-                total_cost = 0
-
-                for resource_name, allocation in combination.items():
+                combo_str = f"{i}. "
+                
+                resource_items = []
+                for resource_name in sorted(combination.keys()):
+                    allocation = combination[resource_name]
                     ra_id = allocation['ra_id']
-                    provider = allocation['provider']
-                    cost = allocation['cost_per_hour']
-                    count = allocation['count']
-                    total_cost += cost * count
-
-                    print(f"  • {resource_name}: {ra_id} ({provider}) - {cost} credits/hr × {count}")
-
-                print(f"  Total Cost: {total_cost:.2f} credits/hr")
-                print()
+                    resource_items.append(f"{resource_name}: {ra_id}")
+                
+                combo_str += ", ".join(resource_items)
+                print(combo_str)
+            
+            print("-" * 60)
+            
+            # Randomly select one combination
+            selected_index = random.randint(0, len(valid_combinations) - 1)
+            selected_combination = valid_combinations[selected_index]
+            
+            print(f"\nSELECTED OFFER (Randomly chosen: #{selected_index + 1}):")
+            print("=" * 60)
+            
+            resource_items = []
+            for resource_name in sorted(selected_combination.keys()):
+                allocation = selected_combination[resource_name]
+                ra_id = allocation['ra_id']
+                resource_items.append(f"{resource_name}: {ra_id}")
+            
+            print(", ".join(resource_items))
+            print("=" * 60)
         else:
-            print("❌ No valid combinations found!")
-            print("   No single combination can fulfill all resource requirements.")
+            print("No valid combinations found!")
+            print("   No combination can fulfill all resource requirements.")
 
-        # Simulate job completion
-        time.sleep(2)
+        # Complete job processing
+        time.sleep(1)
         self.job_complete = True
         self.peer.leave().addCallback(lambda _: self.peer.stop())
 
     def _find_valid_combinations(self, ra_responses, resource_names):
-        """Find all valid combinations that can fulfill all resource requirements"""
-        from itertools import product
-
+        """Find all valid resource allocation combinations"""
         valid_combinations = []
 
-        # For each resource, get list of RAs that can provide it
+        # Map resources to capable RAs
         resource_providers = {}
-
         for resource_name in resource_names:
             providers = []
-
             for ra_id, ra_data in ra_responses.items():
                 response = ra_data['responses'].get(resource_name, {})
                 if response.get('answer') == 'yes':
@@ -215,13 +239,11 @@ class JobSubmissionClient:
                         'provider': ra_data['provider'],
                         'response': response
                     })
-
             resource_providers[resource_name] = providers
 
-        # Check if all resources have at least one provider
+        # Check if all resources can be fulfilled
         for resource_name, providers in resource_providers.items():
             if not providers:
-                print(f"No RA can provide {resource_name}")
                 return []
 
         # Generate all possible combinations
@@ -229,8 +251,6 @@ class JobSubmissionClient:
 
         for combination_tuple in product(*provider_lists):
             combination = {}
-
-            # Create combination dictionary
             for i, resource_name in enumerate(resource_names):
                 provider_info = combination_tuple[i]
                 response = provider_info['response']
@@ -247,26 +267,17 @@ class JobSubmissionClient:
 
         return valid_combinations
 
-    def _handle_job_result(self, peer_id, message):
-        """Handle job execution results"""
-        print(f"✅ Job result from {peer_id}: {message}")
-
 
 def main():
-    """Main function"""
     if len(sys.argv) < 2:
-        print("Usage: python job_submission_client.py <ask.yaml_path>")
-        print("Example: python job_submission_client.py tosca/outputs/ask.yaml")
-        sys.exit(1)
+        sys.exit("Error: ask.yaml path required")
 
     ask_yaml_path = sys.argv[1]
-
-    if not Path(ask_yaml_path).exists():
-        print(f"❌ File not found: {ask_yaml_path}")
-        sys.exit(1)
+    hub_host = sys.argv[2] if len(sys.argv) > 2 else "35.179.157.83"
+    hub_port = int(sys.argv[3]) if len(sys.argv) > 3 else 5001
 
     client = JobSubmissionClient()
-    client.submit_job(ask_yaml_path)
+    client.submit_job(ask_yaml_path, hub_host, hub_port)
 
 
 if __name__ == "__main__":
