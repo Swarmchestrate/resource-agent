@@ -39,15 +39,15 @@ locality:
     continent: Europe
     country: UK
     city: London
-system: 
+system:
   os:
     type: linux
     distribution: ubuntu
-    version: "22.04"
+    version:  "22.04"
   supported-architecture:
     x86: yes
     arm: yes
 energy:
-    energy-type: Green      # enumeration of valid types. 
+    energy-type: Green      # enumeration of valid types.
     powered-type: Battery     # enumeration of valid types.
     consumption: 90        # unit here
