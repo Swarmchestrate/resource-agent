@@ -33,7 +33,7 @@ class JobSubmissionClient:
             self.logger.error(f"Failed to load ask.yaml: {e}")
             return None
 
-    def submit_job(self, ask_yaml_path, hub_host="35.179.157.83", hub_port=5001):
+    def submit_job(self, ask_yaml_path, hub_host="", hub_port=):
         """Submit job to P2P network via hub"""
 
         # Load ask.yaml
