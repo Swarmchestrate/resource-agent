@@ -1,9 +1,9 @@
 metadata:
   capacity-id: "sztaki-ra"
-  description: "SZTAKI Edge instance in Madrid"
+  description: "SZTAKI Multi-type instance in Madrid"
   capacity-provider: "ACME"
   resource-provider: "Openstack"
-  type: "edge"
+  type: "cloud"  # Changed from edge to cloud to match resource1 and resource2
 capacity:
   instances:
     tiny:
@@ -37,8 +37,8 @@ pricing:
   xlarge: 2.8
 locality:
   continent: Europe
-  country: Spain
-  city: Madrid
+  country: UK  # Changed from Spain to UK to match resource2 requirements
+  city: London  # Changed from Madrid to London to match resource2 requirements
 system:
   os:
     type: linux
