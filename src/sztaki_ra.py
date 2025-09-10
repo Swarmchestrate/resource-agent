@@ -30,8 +30,8 @@ if __name__ == "__main__":
     
     try:
         # Initialize SZTAKI Resource Agent
-        config_file = "Config_ras/Sztaki_RA_config.yaml"
-        capacity_file = "Config_ras/SZTAKI_RA_capacity.yaml"
+        config_file = "../Config_ras/Sztaki_RA_config.yaml"
+        capacity_file = "../Config_ras/SZTAKI_RA_capacity.yaml"
         
         print("=" * 60)
         print("🇭🇺 SZTAKI Resource Agent Starting...")

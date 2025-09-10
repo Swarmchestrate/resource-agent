@@ -8,6 +8,9 @@ import time
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
+import random
+from itertools import product
+
 from swchp2pcom import SwchPeer
 from capability_evaluator import can_fulfill_requirement, get_matching_instances
 
@@ -21,6 +24,7 @@ class ResourceAgent:
         self.capacity_file = capacity_file
         self.config = self._load_config(config_file)
         self.capacity = self._load_config(capacity_file) if capacity_file else {}
+        self.job_responses = {}
 
         # Extract configuration values
         self.ra_id = self.config.get('RA_id')
@@ -106,6 +110,7 @@ class ResourceAgent:
         self.peer.register_message_handler("MSG_HEARTBEAT", self._handle_heartbeat)
         self.peer.register_message_handler("MSG_JOB_SUBMIT", self._handle_job_submit)
         self.peer.register_message_handler("MSG_JOB_BROADCAST", self._handle_job_broadcast)
+        self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
 
     def _handle_submit(self, peer_id: str, message: Dict[str, Any]):
         """Handle job submission requests"""
@@ -161,7 +166,7 @@ class ResourceAgent:
         job_id = message.get('job_id')
         ask_yaml = message.get('ask_yaml')
         client_id = message.get('client_id')
-
+        all_ras = self.peer.find_peers({"peer_type": "RA"})
         if not ask_yaml:
             self.logger.error("No ask_yaml data in job submission")
             return
@@ -188,7 +193,7 @@ class ResourceAgent:
                 self.logger.info(f"Broadcasted job to {ra_id}")
 
             # Process locally as well
-            self._process_job_requirements(job_id, client_id, ask_yaml, peer_id)
+            self._process_job_requirements(job_id, client_id, ask_yaml, self.ra_id)
         else:
             self.logger.warning("Non-hub RA received direct job submission")
 
@@ -200,13 +205,14 @@ class ResourceAgent:
         client_id = message.get('client_id')
         ask_yaml = message.get('ask_yaml')
         hub_ra = message.get('hub_ra')
+        all_ras = self.peer.find_peers({"peer_type": "RA"})
 
         # Process job requirements
         self._process_job_requirements(job_id, client_id, ask_yaml, hub_ra)
 
     def _process_job_requirements(self, job_id: str, client_id: str, ask_yaml: Dict, hub_ra: str):
         """Process job requirements against RA capacity"""
-        self.logger.info(f"Evaluating job {job_id} requirements")
+        self.logger.info(f"RA: {self.ra_id} Evaluating job {job_id} requirements")
 
         if not self.capacity:
             self.logger.warning("No capacity data available for evaluation")
@@ -260,13 +266,17 @@ class ResourceAgent:
             "responses": resource_responses
         }
 
-        # Find and notify client
-        clients = self.peer.find_peers({"peer_type": "JOB_CLIENT", "client_id": client_id})
-        if clients:
-            client_peer_id = clients[0]
-            self.peer.send(client_peer_id, "MSG_RESOURCE_RESPONSE", response_message)
-        else:
-            self.logger.warning(f"Client {client_id} not found in network")
+        # Notify hub_ra
+        # Ze-TODO: To remove this part, such that hub_ra handles its own msg to achive this, other with, we would have many special cases for hub_ra.
+        if hub_ra == self.ra_id:
+            if job_id not in self.job_responses:
+                self.job_responses[job_id] = {}
+
+            self.job_responses[job_id][self.ra_id] = {
+                'provider': self.credentials.get('provider'),
+                'responses': resource_responses
+            }
+        self.peer.send(hub_ra, "MSG_RESOURCE_RESPONSE", response_message)
 
     def _evaluate_requirement(self, capabilities: Dict, count: int) -> bool:
         """Evaluate if we can fulfill the requirement using simple evaluator"""
@@ -278,12 +288,13 @@ class ResourceAgent:
         can_fulfill = can_fulfill_requirement(ask_requirements, self.capacity)
         
         if not can_fulfill:
+            self.logger.info("Requirements are not fulfilled")
             return False
-        
+          
         # Find matching instances
         suitable_instances = get_matching_instances(capabilities, self.capacity)
         if not suitable_instances:
-            self.logger.info("No suitable instances found")
+            self.logger.info("Requirement fulfilled, but no suitable instances found")
             return False
         
         # Verify quota availability
@@ -375,10 +386,172 @@ class ResourceAgent:
         country = locality.get('country', 'Unknown')
         return f"{city}, {country}"
 
+    def _handle_resource_response(self, peer_id, message):
+        """Process resource response from RA"""
+        job_id = message.get('job_id')
+        ra_id = message.get('ra_id')
+        provider = message.get('provider')
+        responses = message.get('responses', {})
+
+        if job_id not in self.job_responses:
+            self.job_responses[job_id] = {}
+
+        self.job_responses[job_id][ra_id] = {
+            'provider': provider,
+            'responses': responses
+        }
+
+        # Check if all RAs have responded
+        all_ras = self.peer.find_peers({"peer_type": "RA"})
+        print(f"the length of all_ras is {all_ras}, the number of received reponses is {len(self.job_responses.get(job_id, {}))}")
+        if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
+            # Ze-TODO: at here, compute the resource response of the LRA, compile all possible offers.
+            # 
+            self._compile_and_display_results(job_id)
+
+    def _compile_and_display_results(self, job_id):
+        """Compile and display resource allocation results"""
+        print("\nCompiling resource offers...")
+        print("=" * 60)
+
+        ra_responses = self.job_responses.get(job_id, {})
+
+        # Extract all resource names from responses
+        all_resource_names = set()
+        for ra_id, ra_data in ra_responses.items():
+            if ra_data['responses']:
+                all_resource_names.update(ra_data['responses'].keys())
+
+        if not all_resource_names:
+            print("No resource requirements found")
+            return
+
+        # Display response matrix
+        resource_names = sorted(all_resource_names)
+        
+        print("Response Summary:")
+        print("-" * 60)
+        
+        # Create table header
+        header = f"{'RA (Provider)':<20}"
+        for resource_name in resource_names:
+            header += f"{resource_name.title():<15}"
+        print(header)
+        print("-" * (20 + len(resource_names) * 15))
+
+        # Create table rows
+        for ra_id, ra_data in ra_responses.items():
+            provider = ra_data['provider']
+            responses = ra_data['responses']
+
+            row = f"{ra_id} ({provider})"[:19].ljust(20)
+            for resource_name in resource_names:
+                answer = responses.get(resource_name, {}).get('answer', 'N/A')
+                row += f"{answer}"[:14].ljust(15)
+            print(row)
+
+        print("\nFinding valid combinations...")
+        print("=" * 60)
+
+        # Find feasible resource combinations
+        valid_combinations = self._find_valid_combinations(ra_responses, resource_names)
+
+        if valid_combinations:
+            print(f"Found {len(valid_combinations)} valid combination(s):")
+            print("-" * 60)
+            print("Possible offers:")
+            
+            for i, combination in enumerate(valid_combinations, 1):
+                combo_str = f"{i}. "
+                
+                resource_items = []
+                for resource_name in sorted(combination.keys()):
+                    allocation = combination[resource_name]
+                    ra_id = allocation['ra_id']
+                    resource_items.append(f"{resource_name}: {ra_id}")
+                
+                combo_str += ", ".join(resource_items)
+                print(combo_str)
+            
+            print("-" * 60)
+            
+            # Randomly select one combination
+            selected_index = random.randint(0, len(valid_combinations) - 1)
+            selected_combination = valid_combinations[selected_index]
+            
+            print(f"\nSELECTED OFFER (Randomly chosen: #{selected_index + 1}):")
+            print("=" * 60)
+            
+            resource_items = []
+            for resource_name in sorted(selected_combination.keys()):
+                allocation = selected_combination[resource_name]
+                ra_id = allocation['ra_id']
+                resource_items.append(f"{resource_name}: {ra_id}")
+            
+            print(", ".join(resource_items))
+            print("=" * 60)
+        else:
+            print("No valid combinations found!")
+            print("   No combination can fulfill all resource requirements.")
+
+        # Complete job processing
+        time.sleep(1)
+        self.job_complete = True
+        #self.peer.leave().addCallback(lambda _: self.peer.stop())
+
+    def _find_valid_combinations(self, ra_responses, resource_names):
+        """Find all valid resource allocation combinations"""
+        valid_combinations = []
+
+        # Map resources to capable RAs
+        resource_providers = {}
+        for resource_name in resource_names:
+            providers = []
+            for ra_id, ra_data in ra_responses.items():
+                response = ra_data['responses'].get(resource_name, {})
+                if response.get('answer') == 'yes':
+                    providers.append({
+                        'ra_id': ra_id,
+                        'provider': ra_data['provider'],
+                        'response': response
+                    })
+            resource_providers[resource_name] = providers
+
+        # Check if all resources can be fulfilled
+        for resource_name, providers in resource_providers.items():
+            if not providers:
+                return []
+
+        # Generate all possible combinations
+        provider_lists = [resource_providers[name] for name in resource_names]
+
+        for combination_tuple in product(*provider_lists):
+            combination = {}
+            for i, resource_name in enumerate(resource_names):
+                provider_info = combination_tuple[i]
+                response = provider_info['response']
+
+                combination[resource_name] = {
+                    'ra_id': provider_info['ra_id'],
+                    'provider': provider_info['provider'],
+                    'cost_per_hour': response.get('bid', {}).get('cost_per_hour', 0),
+                    'count': response.get('bid', {}).get('count', 1),
+                    'instance_type': response.get('bid', {}).get('instance_type', 'unknown')
+                }
+
+            valid_combinations.append(combination)
+
+        return valid_combinations
+
+
+
+
+
     def connect_to_network(self):
         """Connect to P2P network using bootstrap peers"""
         if not self.bootstrap_peers:
             self.logger.info("No bootstrap peers configured - running as hub")
+            #self.peer.enter("172.31.40.7", 5000)
             return
 
         # Connect to configured bootstrap peers

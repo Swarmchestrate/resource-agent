@@ -29,8 +29,8 @@ if __name__ == "__main__":
     
     try:
         # Initialize AWS UK Resource Agent
-        config_file = "Config_ras/Aws_UK_RA_config.yaml"
-        capacity_file = "Config_ras/Aws_UK_RA_capacity.yaml"
+        config_file = "../Config_ras/Aws_UK_RA_config.yaml"
+        capacity_file = "../Config_ras/Aws_UK_RA_capacity.yaml"
         
         print("=" * 60)
         print("🇬🇧 AWS UK Resource Agent Starting...")

@@ -14,24 +14,25 @@ def can_fulfill_requirement(ask_requirements: dict, capacity_data: dict) -> bool
     """
     capabilities = ask_requirements.get('capabilities', {})
     
-    for category, category_data in capabilities.items():
-        if not isinstance(category_data, dict):
+    for requirement_type, requirement_data in capabilities.items():
+        if not isinstance(requirement_data, dict):
             continue
             
-        properties = category_data.get('properties', {})
+        properties = requirement_data.get('properties', {})
         if not properties:
             continue
         
-        if not check_category_requirements(category, properties, capacity_data):
+        if not check_requirement_type_requirements(requirement_type, properties, capacity_data):
+            print(f"requirement_type: {requirement_type} not fulfilled, properties are:\n {properties}\n capacity of the RA are:\n {capacity_data} ")
             return False
     
     return True
 
 
-def check_category_requirements(category: str, properties: dict, capacity_data: dict) -> bool:
-    """Check all properties in a category against capacity"""
+def check_requirement_type_requirements(requirement_type: str, properties: dict, capacity_data: dict) -> bool:
+    """Check all properties in a requirement_type against capacity"""
     
-    if category == 'host':
+    if requirement_type == 'host':
         instances = find_in_capacity(capacity_data, ['capacity.instances', 'instances'])
         if not instances:
             return False
@@ -43,7 +44,7 @@ def check_category_requirements(category: str, properties: dict, capacity_data: 
     
     else:
         for prop_key, prop_value in properties.items():
-            if not check_property_anywhere(category, prop_key, prop_value, capacity_data):
+            if not check_property_anywhere(requirement_type, prop_key, prop_value, capacity_data):
                 return False
         return True
 
@@ -107,7 +108,7 @@ def check_instance_requirements(requirements: dict, instance_data: dict, capacit
     return True
 
 
-def check_property_anywhere(category: str, prop_key: str, prop_value, capacity_data: dict) -> bool:
+def check_property_anywhere(requirement_type: str, prop_key: str, prop_value, capacity_data: dict) -> bool:
     """Find and check a property anywhere in capacity data"""
     
     search_paths = {
@@ -118,13 +119,13 @@ def check_property_anywhere(category: str, prop_key: str, prop_value, capacity_d
         'energy': ['energy', 'power']
     }
     
-    paths = search_paths.get(category, [category])
+    paths = search_paths.get(requirement_type, [requirement_type])
     
     for path in paths:
         section = find_in_capacity(capacity_data, [path])
         if section and isinstance(section, dict):
             # Special handling for pricing
-            if category == 'pricing' and prop_key == 'cost':
+            if requirement_type == 'pricing' and prop_key == 'cost':
                 # Check if any instance price meets requirement
                 if isinstance(prop_value, dict) and '$less_or_equal' in prop_value:
                     max_cost = parse_number(prop_value['$less_or_equal'])
@@ -144,12 +145,12 @@ def check_property_anywhere(category: str, prop_key: str, prop_value, capacity_d
                     if check_value(prop_value, section[key_variant]):
                         return True
             
-            # For resource category, try prefixed keys
-            if category == 'resource':
+            # For resource requirement_type, try prefixed keys
+            if requirement_type == 'resource':
                 prefixed_keys = [
                     f'resource-{prop_key}',
                     f'capacity-{prop_key}',
-                    f'{category}-{prop_key}'
+                    f'{requirement_type}-{prop_key}'
                 ]
                 for prefixed in prefixed_keys:
                     if prefixed in section:
