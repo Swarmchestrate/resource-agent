@@ -63,7 +63,7 @@ class JobSubmissionClient:
             print(f"Failed to load ask.yaml: {e}")
             return None
  
-    def submit_job(self, ask_yaml_path, hub_host="172.31.40.7", hub_port=5001):
+    def submit_job(self, ask_yaml_path, hub_host="", hub_port=5000):
         """Submit job to RA network via hub"""
         ask_data = self.load_ask_yaml(ask_yaml_path)
         if not ask_data:
@@ -123,7 +123,7 @@ def main():
         sys.exit("Error: ask.yaml path required")
  
     ask_yaml_path = sys.argv[1]
-    hub_host = sys.argv[2] if len(sys.argv) > 2 else "172.31.40.7"
+    hub_host = sys.argv[2] if len(sys.argv) > 2 else ""
     hub_port = int(sys.argv[3]) if len(sys.argv) > 3 else 5000
  
     client = JobSubmissionClient()
