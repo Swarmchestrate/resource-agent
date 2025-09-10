@@ -3,8 +3,8 @@ resource1:
   capabilities:
     host:
       properties:
-        num-cpus:        { $in_range: [2, 4] }
-        mem-size:        { $greater_or_equal: 16 } # GB 
+        num-cpus:        { $in_range: [2, 16] }
+        mem-size:        { $greater_or_equal: 4 } # GB 
         disk-size:       10     # GB
         cpu-architecture: x86_64
     os:
@@ -12,24 +12,9 @@ resource1:
         type:          linux
         distribution:  ubuntu
         version:       "22.04"
-    resource:
-      properties:
-        provider:          { $in: [ Amazon, Azure ] }
-        capacity-provider: ACME
-        type:              cloud
     pricing:
       properties:
         cost: { $less_or_equal: 1} # credit / hr
-    locality:
-      properties:
-        continent: { $in: [ Europe, Asia ] }
-        country:   { $in: [ Spain, UK, India ] }
-        city:      { $in: [ Madrid, London, Mumbai ] }
-    energy:
-      properties:
-        energy-type:   Green
-        powered-type:  Battery
-        consumption:   { $less_or_equal: 100} # W 
 
 resource2:
   capabilities:
@@ -44,29 +29,11 @@ resource2:
       properties:
         type:          linux
         distribution:  ubuntu
-        version:       "24.04"
-
-    resource:
-      properties:
-        provider:          Amazon
-        capacity-provider: ACME
-        type:              edge
+        version:       "22.04"
 
     pricing:
       properties:
         cost: { $less_or_equal: 2 credit / hr}
-
-    locality:
-      properties:
-        continent: { $in: [ Europe ] }
-        country:   { $in: [ UK, Paris ] }
-        city:      { $in: [ London, Manchester, Paris ] }
-
-    energy:
-      properties:
-        energy-type:   Mix
-        powered-type:  Mains
-        consumption:   { $less_or_equal: 300 W }
 
 resource3:
   capabilities:
@@ -81,21 +48,6 @@ resource3:
         type:          linux
         distribution:  ubuntu
         version:       { $in: [ "22.04", "24.04" ] }  
-    resource:
-      properties:
-        provider:          { $in: [ Amazon, Openstack ] }  
-        capacity-provider: ACME
-        type:              { $in: [ edge, cloud ] } 
     pricing:
       properties:
         cost: { $less_or_equal: 2} 
-    locality:
-      properties:
-        continent: { $in: [ Europe, "North America" ] }  
-        country:   { $in: [ UK, Spain, USA ] } 
-        city:      { $in: [ London, Madrid, Virginia ] }  
-    energy:
-      properties:
-        energy-type:   { $in: [ Green, Mix ] }
-        powered-type:  { $in: [ Battery, Mains ] }
-        consumption:   { $less_or_equal: 200} 
