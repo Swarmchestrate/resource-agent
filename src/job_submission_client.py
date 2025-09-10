@@ -15,13 +15,14 @@ from swchp2pcom import SwchPeer
  
 class JobSubmissionClient:
     """Client for submitting jobs and collecting resource offers"""
- 
+
     def __init__(self, client_id="job-client"):
         self.client_id = client_id
         self.peer = None
         self.job_responses = {}
         self.job_complete = False
  
+
         # Setup minimal logging
         logging.basicConfig(level=logging.WARNING)
         self.logger = logging.getLogger(f"JobClient-{client_id}")
@@ -54,14 +55,15 @@ class JobSubmissionClient:
                 print(f"📋 Resources: {', '.join(resource_details)}")
             else:
                 print("YAML data is None or empty")
-               
+            
             return yaml_data
-           
+                
+            
         except Exception as e:
             print(f"Failed to load ask.yaml: {e}")
             return None
  
-    def submit_job(self, ask_yaml_path, hub_host="35.179.157.83", hub_port=5001):
+    def submit_job(self, ask_yaml_path, hub_host="172.31.40.7", hub_port=5001):
         """Submit job to RA network via hub"""
         ask_data = self.load_ask_yaml(ask_yaml_path)
         if not ask_data:
@@ -70,6 +72,7 @@ class JobSubmissionClient:
         print("Swarmchestrate Job Submission Client")
         print("=" * 60)
  
+
         # Initialize P2P client
         self.peer = SwchPeer(
             peer_id=self.client_id,
@@ -83,6 +86,8 @@ class JobSubmissionClient:
         def on_entered():
             print(f"Connected to hub {hub_host}:{hub_port}")
  
+
+
             # Find hub RA
             hub_ras = self.peer.find_peers({"peer_type": "RA", "ra_id": "Aws-UK-RA"})
             if not hub_ras:
@@ -91,7 +96,7 @@ class JobSubmissionClient:
  
             hub_ra_id = hub_ras[0]
             print(f"Connected to hub: {hub_ra_id}")
- 
+
             # Create job submission message
             job_message = {
                 "job_id": f"job_{int(time.time())}",
