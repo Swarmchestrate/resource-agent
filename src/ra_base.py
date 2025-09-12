@@ -184,7 +184,8 @@ class ResourceAgent:
                 "client_id": client_id,
                 "ask_yaml": ask_yaml,
                 "timestamp": message.get('timestamp'),
-                "hub_ra": self.ra_id
+                "hub_ra": self.peer.peer_id
+                #"hub_ra": self.ra_id
             }
 
             # Broadcast to all other RAs
@@ -266,16 +267,8 @@ class ResourceAgent:
             "responses": resource_responses
         }
 
-        # Notify hub_ra
-        # Ze-TODO: To remove this part, such that hub_ra handles its own msg to achive this, other with, we would have many special cases for hub_ra.
-        if hub_ra == self.ra_id:
-            if job_id not in self.job_responses:
-                self.job_responses[job_id] = {}
+        all_ras = self.peer.find_peers({"peer_type": "RA"})
 
-            self.job_responses[job_id][self.ra_id] = {
-                'provider': self.credentials.get('provider'),
-                'responses': resource_responses
-            }
         self.peer.send(hub_ra, "MSG_RESOURCE_RESPONSE", response_message)
 
     def _evaluate_requirement(self, capabilities: Dict, count: int) -> bool:
