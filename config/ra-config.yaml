@@ -1,0 +1,10 @@
+RA_id: "<RA_ID>"                # e.g., "Aws-UK-RA"
+universe_id: "<UNIVERSE_ID>"    # e.g., "swarmchestrate_universe"
+credentials:
+  provider: "<PROVIDER>"        # e.g., "aws"
+  access_key: "<ACCESS_KEY>"    # Your cloud access key
+  secret_key: "<SECRET_KEY>"    # Your cloud secret key
+api_port: <API_PORT>            # e.g., 5000
+p2p_port: <P2P_PORT>            # e.g., 5000
+domain: "<DOMAIN>"              # e.g., "0.0.0.0"
+bootstrap_peers: []             # List of bootstrap peers, e.g., ["peer1:port", "peer2:port"]

@@ -85,10 +85,8 @@ class JobSubmissionClient:
  
         def on_entered():
             print(f"Connected to hub {hub_host}:{hub_port}")
- 
 
-
-            # Find hub RA
+            # Find Gateway RA
             hub_ras = self.peer.find_peers({"peer_type": "RA", "ra_id": "Aws-UK-RA"})
             if not hub_ras:
                 print("Hub RA (Aws-UK-RA) not found!")
@@ -106,9 +104,9 @@ class JobSubmissionClient:
                 "action": "broadcast_job"
             }
  
-            print("📡 Broadcasting job to all RAs...")
+            print("Sending job to the selected RA...")
             self.peer.send(hub_ra_id, "MSG_JOB_SUBMIT", job_message)
-            print("Waiting for responses...")
+            print("Job submitted.")
  
         try:
             self.peer.enter(hub_host, hub_port).addCallback(lambda _: on_entered())
@@ -119,12 +117,12 @@ class JobSubmissionClient:
             return False
  
 def main():
-    if len(sys.argv) < 2:
-        sys.exit("Error: ask.yaml path required")
+    if len(sys.argv) < 4:
+        sys.exit("Error: Three parameters are required: {Path of ask.yaml file, IP of Gateway RA, port}")
  
     ask_yaml_path = sys.argv[1]
-    hub_host = sys.argv[2] if len(sys.argv) > 2 else ""
-    hub_port = int(sys.argv[3]) if len(sys.argv) > 3 else 5000
+    hub_host = sys.argv[2]          # IP of RA to which job is submitted
+    hub_port = int(sys.argv[3])     # Port of RA to which job is submitted
  
     client = JobSubmissionClient()
     client.submit_job(ask_yaml_path, hub_host, hub_port)
