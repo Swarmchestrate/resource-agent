@@ -1,7 +1,5 @@
-# Swarmchestrate Resource Agent
-
-A peer-to-peer (P2P) network of Resource Agents (RAs) representing different cloud VMs that can evaluate TOSCA resource requirements and provide resource bids.
-
+# Swarmchestrate - Resource Agent
+The Resource Agent (RA) is a core component of Swarmchestrate with two main roles: (1) abstracting and representing one or more Capacities to provide access to their resources, and (2) collaborating with other RAs to discover and allocate suitable resources across the full resource stack for submitted applications. This collaboration is enabled through the P2P network, which is automatically formed when RAs are instantiated.
 
 ## Quick Start
 
@@ -11,7 +9,7 @@ A peer-to-peer (P2P) network of Resource Agents (RAs) representing different clo
 
 ### Installation
 
-1. Create and activate virtual environment:
+1. Create and activate a virtual environment:
 ```bash
 python -m venv ra_env
 source ra_env/bin/activate  # On Windows: ra_env\Scripts\activate
@@ -22,44 +20,26 @@ source ra_env/bin/activate  # On Windows: ra_env\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Running Resource Agents
+## Usage
+Run the following command to instantiate an RA
 
-1. **AWS UK RA (Hub)**:
 ```bash
-python src/aws_uk_ra.py
+python src/ra.py [arg1] [arg2]
 ```
+### Arguments
+- `arg1` (Optional): Path to the RA configuration file. 
+- `arg2` (Optional): Path to the Capacity configuration file.
 
-2. **AWS US RA**:
+  The templates of these config files are available in the config/ directory.
+
+### Resource selection jobs
+Run the Job submission client script to submit a request to select resources for a given application:
+
 ```bash
-python src/aws_us_ra.py
+python job_submission_client.py [arg1] [arg2] [arg3] 
 ```
-
-3. **SZTAKI RA**:
-```bash
-python src/sztaki_ra.py
-```
-
-### Submitting Jobs
-
-Run the submit application requirements:
-```bash
-python job_submission_client.py tosca/outputs/ask.yaml
-```
-
-## Configuration
-
-Resource Agent configurations are stored in `Config_ras/`:
-- `Aws_UK_RA_config.yaml` / `Aws_UK_RA_capacity.yaml`
-- `Aws_US_RA_config.yaml` / `Aws_USA_RA_capacity.yaml`
-- `Sztaki_RA_config.yaml` / `SZTAKI_RA_capacity.yaml`
-
-## TOSCA Requirements
-
-Example `ask.yaml` files are in `tosca/outputs/` showing resource requirements that RAs can evaluate.
-
-## Network Topology
-
-- **AWS UK RA**: Acts as the bootstrap hub (port ---)
-- **AWS US RA**: Connects to UK hub (port ---)
-- **SZTAKI RA**: Connects to UK hub (port ---)
+### Arguments
+- `arg1` (Mandatory): Path to the YAML-based resource requirements file. An example template can be found in tosca/output/ask.yaml.
+- `arg2` (Mandatory): IP address of the RA to which the request is submitted.
+- `arg3` (Mandatory): Port number of the RA to which the request is submitted.
 
