@@ -117,13 +117,13 @@ class JobSubmissionClient:
             return False
  
 def main():
-    if len(sys.argv) < 4:
-        sys.exit("Error: Three parameters are required: {Path of ask.yaml file, IP of Gateway RA, port, ID of Gateway RA}")
+    if len(sys.argv) < 5:
+        sys.exit("Error: Four parameters are required: {Path of ask.yaml file, IP of Gateway RA, port, ID of Gateway RA}")
  
     ask_yaml_path = sys.argv[1]
     hub_host = sys.argv[2]          # IP of RA to which job is submitted
     hub_port = int(sys.argv[3])     # Port of RA to which job is submitted
-    gw_RA_id = sys.argv[4]          # ID of Gateway RA to which job is submitted
+    gw_RA_id = sys.argv[4]          # ID of Gateway RA to which job is submitted.
  
     client = JobSubmissionClient()
     client.submit_job(ask_yaml_path, hub_host, hub_port,gw_RA_id)

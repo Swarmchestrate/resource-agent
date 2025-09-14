@@ -36,10 +36,11 @@ python src/ra.py [arg1] [arg2]
 Run the Job submission client script to submit a request to select resources for a given application:
 
 ```bash
-python job_submission_client.py [arg1] [arg2] [arg3] 
+python job_submission_client.py [arg1] [arg2] [arg3] [arg4] 
 ```
 ### Arguments
 - `arg1` (Mandatory): Path to the YAML-based resource requirements file. An example template can be found in tosca/output/ask.yaml.
 - `arg2` (Mandatory): IP address of the RA to which the request is submitted.
 - `arg3` (Mandatory): Port number of the RA to which the request is submitted.
+- `arg4` (Mandatory): ID of Gateway RA to which job is submitted.
 
