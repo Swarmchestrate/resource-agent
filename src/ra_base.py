@@ -2,6 +2,7 @@
 Base Resource Agent (RA) implementation
 Handles P2P communication and resource matching
 """
+import json
 import logging
 import yaml
 import time
@@ -462,22 +463,24 @@ class ResourceAgent:
             print("-" * 60)
             print("Possible offers:")
             
-            energy_consumption = 0
-            total_bandwidth = 0
             for i, combination in enumerate(valid_combinations, 1):
                 combo_str = f"{i}. "
                 
                 resource_items = []
+                energy_consumption = 0
+                total_bandwidth = 0
+                total_price = 0
                 for resource_name in sorted(combination.keys()):
                     allocation = combination[resource_name]
                     ra_id = allocation['ra_id']
                     energy_consumption += allocation['energy-consumption']
+                    total_price += allocation['cost_per_hour']
                     total_bandwidth += allocation['bandwidth']
                     resource_items.append(f"{resource_name}: {ra_id}")
                 
                 combo_str += ", ".join(resource_items)
                 print(combo_str)
-                print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}")
+                print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}, total price is: {total_price}")
             print("-" * 60)
             
             # Randomly select one combination
@@ -490,20 +493,25 @@ class ResourceAgent:
             resource_items = []
             energy_consumption = 0
             total_bandwidth = 0
+            total_price = 0
             for resource_name in sorted(selected_combination.keys()):
                 allocation = selected_combination[resource_name]
                 ra_id = allocation['ra_id']
                 energy_consumption += allocation['energy-consumption']
                 total_bandwidth += allocation['bandwidth']
+                total_price += allocation['cost_per_hour']
                 resource_items.append(f"{resource_name}: {ra_id}")
             
             print(", ".join(resource_items))
-            print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}")
+            print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}, total price is: {total_price}")
             print("=" * 60)
         else:
             print("No valid combinations found!")
             print("   No combination can fulfill all resource requirements.")
 
+# Save valid_combinations to a JSON file
+        with open("valid_combinations.json", "w") as f:
+            json.dump(valid_combinations, f, indent=2)
         # Complete job processing
         time.sleep(1)
         self.job_complete = True
