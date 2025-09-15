@@ -312,13 +312,19 @@ class ResourceAgent:
     def _create_bid(self, resource_name: str, capabilities: Dict, count: int) -> Dict:
         """Create bid information for resource"""
         suitable_instances = get_matching_instances(capabilities, self.capacity)
+        #print(f"capabilities are: {capabilities}")
+        #print(f"\n\n\ncapacity is: {self.capacity}")
         if not suitable_instances:
             return {}
 
         # Find most cost-effective instance
+        # Ze-TODO: we should use the smallest instance that fulfills the requirements.
+        # We should add total energy consumption and bandwidth avaliablility into the responses.
         our_pricing = self.capacity.get('pricing', {})
         best_instance = min(suitable_instances, key=lambda x: our_pricing.get(x, float('inf')))
         best_cost = our_pricing.get(best_instance, 0)
+        #print(f"\n\n\nbest instance is: {self.capacity['capacity']['instances'][best_instance]['energy-consumption']}")
+        #print(f"\n\n\nbest instance is: {self.capacity['capacity']['instances'][best_instance]['bandwidth']}")
 
         return {
             "instance_type": best_instance,
@@ -327,7 +333,9 @@ class ResourceAgent:
             "currency": "credits",
             "count": count,
             "setup_fee": 0,
-            "minimum_duration": "1 hour"
+            "minimum_duration": "1 hour",
+            "energy-consumption": self.capacity['capacity']['instances'][best_instance]['energy-consumption'],
+            "bandwidth": self.capacity['capacity']['instances'][best_instance]['bandwidth']
         }
 
     def _create_resource_definition(self, resource_name: str, capabilities: Dict, count: int) -> Dict:
@@ -454,6 +462,8 @@ class ResourceAgent:
             print("-" * 60)
             print("Possible offers:")
             
+            energy_consumption = 0
+            total_bandwidth = 0
             for i, combination in enumerate(valid_combinations, 1):
                 combo_str = f"{i}. "
                 
@@ -461,11 +471,13 @@ class ResourceAgent:
                 for resource_name in sorted(combination.keys()):
                     allocation = combination[resource_name]
                     ra_id = allocation['ra_id']
+                    energy_consumption += allocation['energy-consumption']
+                    total_bandwidth += allocation['bandwidth']
                     resource_items.append(f"{resource_name}: {ra_id}")
                 
                 combo_str += ", ".join(resource_items)
                 print(combo_str)
-            
+                print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}")
             print("-" * 60)
             
             # Randomly select one combination
@@ -476,12 +488,17 @@ class ResourceAgent:
             print("=" * 60)
             
             resource_items = []
+            energy_consumption = 0
+            total_bandwidth = 0
             for resource_name in sorted(selected_combination.keys()):
                 allocation = selected_combination[resource_name]
                 ra_id = allocation['ra_id']
+                energy_consumption += allocation['energy-consumption']
+                total_bandwidth += allocation['bandwidth']
                 resource_items.append(f"{resource_name}: {ra_id}")
             
             print(", ".join(resource_items))
+            print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}")
             print("=" * 60)
         else:
             print("No valid combinations found!")
@@ -529,7 +546,9 @@ class ResourceAgent:
                     'provider': provider_info['provider'],
                     'cost_per_hour': response.get('bid', {}).get('cost_per_hour', 0),
                     'count': response.get('bid', {}).get('count', 1),
-                    'instance_type': response.get('bid', {}).get('instance_type', 'unknown')
+                    'instance_type': response.get('bid', {}).get('instance_type', 'unknown'),
+                    'energy-consumption': response.get('bid', {}).get('energy-consumption', 0),
+                    'bandwidth': response.get('bid', {}).get('bandwidth', 0)
                 }
 
             valid_combinations.append(combination)
