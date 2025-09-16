@@ -4,6 +4,9 @@
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
 
+# Numpy for ranking
+numpy==2.3.3
+
 # Pydantic for data validation
 pydantic==2.11.7
 pydantic-settings==2.10.1
@@ -15,6 +18,8 @@ PyYAML==6.0.2
 swchp2pcom==0.4.1
 # Async support
 asyncio-mqtt==0.16.1
+# cluster-builder Library
+cluster-builder==0.3.1
 
 # Logging and monitoring
 python-json-logger==2.0.7
