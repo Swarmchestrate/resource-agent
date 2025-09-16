@@ -8,12 +8,16 @@ import yaml
 import time
 from typing import Dict, Any, Optional, List
 from pathlib import Path
+from offer_evaluator import OfferEvaluator
+
 
 import random
 from itertools import product
 
 from swchp2pcom import SwchPeer
 from capability_evaluator import can_fulfill_requirement, get_matching_instances
+
+from cluster_builder import Swarmchestrate
 
 
 class ResourceAgent:
@@ -25,8 +29,10 @@ class ResourceAgent:
         self.capacity_file = capacity_file
         self.config = self._load_config(config_file)
         self.capacity = self._load_config(capacity_file) if capacity_file else {}
+        # job_responses collect RAs' responses to a job request [job_id][responses]
         self.job_responses = {}
-
+        # job_offer stores the offer that fulfills a job request [job_id][]
+        self.job_offers = {}
         # Extract configuration values
         self.ra_id = self.config.get('RA_id')
         self.universe_id = self.config.get('universe_id')
@@ -112,6 +118,7 @@ class ResourceAgent:
         self.peer.register_message_handler("MSG_JOB_SUBMIT", self._handle_job_submit)
         self.peer.register_message_handler("MSG_JOB_BROADCAST", self._handle_job_broadcast)
         self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
+        self.peer.register_message_handler("MSG_CREATE_RESOURCE", self._handle_create_resource)
 
     def _handle_submit(self, peer_id: str, message: Dict[str, Any]):
         """Handle job submission requests"""
@@ -319,13 +326,10 @@ class ResourceAgent:
             return {}
 
         # Find most cost-effective instance
-        # Ze-TODO: we should use the smallest instance that fulfills the requirements.
-        # We should add total energy consumption and bandwidth avaliablility into the responses.
+        # Ze-DONE: we should use the smallest instance that fulfills the requirements.
         our_pricing = self.capacity.get('pricing', {})
         best_instance = min(suitable_instances, key=lambda x: our_pricing.get(x, float('inf')))
         best_cost = our_pricing.get(best_instance, 0)
-        #print(f"\n\n\nbest instance is: {self.capacity['capacity']['instances'][best_instance]['energy-consumption']}")
-        #print(f"\n\n\nbest instance is: {self.capacity['capacity']['instances'][best_instance]['bandwidth']}")
 
         return {
             "instance_type": best_instance,
@@ -407,9 +411,30 @@ class ResourceAgent:
         all_ras = self.peer.find_peers({"peer_type": "RA"})
         print(f"the length of all_ras is {all_ras}, the number of received reponses is {len(self.job_responses.get(job_id, {}))}")
         if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
-            # Ze-TODO: at here, compute the resource response of the LRA, compile all possible offers.
-            # 
+            # Ze: at here, LRA compiles all possible offers based on responses.
             self._compile_and_display_results(job_id)
+        if job_id not in self.job_offers:
+            logging.error("No resources are available for job %s", job_id)
+            return None
+        # Ze: randomly select a resource's RA node as LR
+        LR_index = random.randint(0, len(self.job_offers[job_id]) - 1)+1
+        print(f"LR_index is {LR_index}")
+        selected_resource = f"resource{LR_index}"
+        LR_id = self.job_offers[job_id][selected_resource]["ra_id"]
+        print(f"LR_index is {LR_index}, LR_id is {LR_id}, selected_resource is {self.job_offers[job_id][selected_resource]}")
+	# Ze-TODO: define msg send to a RA such that it can use it to create a VM.
+      #  master_node = '{ "cloud": "edge","edge_device_ip": "18.130.228.103", "ssh_user": "ubuntu", "ssh_auth_method": "key", "ssh_private_key": "/home/ubuntu/test/g.pem","k3s_role": "master"}'
+ 
+        #master_node = '{ "cloud": "aws","instance_type": "t2.micro","ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/test/g.pem","ami": "ami-00ca32bbc84273381"}'
+        #master_node = json.loads(master_node)
+        #swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+        #outputs = swarmchestrate.add_node(master_node)
+        #print(f"Output from master node is: {outputs}")
+        
+#        self.peer.send(LR_id, "MSG_CREATE_RESOURCE", msg_resource_request_ra)
+        self.logger.info(f"Sent resource request to RA: {LR_id}")
+
+
 
     def _compile_and_display_results(self, job_id):
         """Compile and display resource allocation results"""
@@ -484,7 +509,8 @@ class ResourceAgent:
             print("-" * 60)
             
             # Randomly select one combination
-            selected_index = random.randint(0, len(valid_combinations) - 1)
+            selected_index = self._rank_resource_offers(valid_combinations)
+            #selected_index = random.randint(0, len(valid_combinations) - 1)
             selected_combination = valid_combinations[selected_index]
             
             print(f"\nSELECTED OFFER (Randomly chosen: #{selected_index + 1}):")
@@ -515,7 +541,58 @@ class ResourceAgent:
         # Complete job processing
         time.sleep(1)
         self.job_complete = True
+        if job_id not in self.job_offers:
+            self.job_offers[job_id] = {}
+
+        self.job_offers[job_id] = selected_combination
+        print(f"job_offer for job {job_id} is {self.job_offers[job_id]}, size is {len(self.job_offers[job_id])}")
         #self.peer.leave().addCallback(lambda _: self.peer.stop())
+
+    def _rank_resource_offers(self,valid_combinations):
+        """Rank resource offers based on QoS attributes"""
+        qos_priority = {
+            "energy": 0.5,
+            "bandwidth": 0.5,
+            "latency": 0.5,
+            "price": 0.5
+        }
+        reliability_list = []
+        latency_list = []
+        energy_list = []
+        bandwidth_list = []
+        price_list = []
+        for combination in valid_combinations:
+            total_energy = 0
+            total_bandwidth = 0
+            total_price = 0
+            for resource in combination.values():
+                total_energy += resource.get('energy-consumption', 0)
+                total_bandwidth += resource.get('bandwidth', 0)
+                total_price += resource.get('cost_per_hour', 0)
+            energy_list.append(total_energy)
+            bandwidth_list.append(total_bandwidth)
+            price_list.append(total_price)
+            reliability_list.append(1) # Placeholder for reliability
+            latency_list.append(1)     # Placeholder for latency 
+
+        offer_data = {
+            "qos_priority": qos_priority,
+            "reliability": reliability_list,
+            "energy": energy_list,
+            "bandwidth": bandwidth_list,
+            "latency": latency_list,
+            "price": price_list
+        }
+
+        # Save offer data to a JSON file for debugging
+        with open("rank-format.json", "w") as f:
+            json.dump(offer_data, f, indent=2)
+
+        # Call ranking function
+        evaluator = OfferEvaluator(offer_data)
+        optimal_index = evaluator.rank_offers_without_reliability()
+        # Return first item if optimal_index is not empty
+        return optimal_index[0]
 
     def _find_valid_combinations(self, ra_responses, resource_names):
         """Find all valid resource allocation combinations"""
@@ -548,7 +625,7 @@ class ResourceAgent:
             for i, resource_name in enumerate(resource_names):
                 provider_info = combination_tuple[i]
                 response = provider_info['response']
-
+		# Ze: combination info
                 combination[resource_name] = {
                     'ra_id': provider_info['ra_id'],
                     'provider': provider_info['provider'],
@@ -563,6 +640,21 @@ class ResourceAgent:
 
         return valid_combinations
 
+
+    def _handle_create_resource(self, peer_id, message):
+        """Process create resource request from LRA"""
+        self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
+        job_id = message.get('job_id')
+        LR = message.get('lead_resource')
+        print(f"LR is {LR}")
+        instance = message.get('instance', {})
+	# Ze-TODO: finish the following
+        if(LR):
+	    # Ze: if it is the lead resource, it creates the LR VM, k3s cluster, deploy LSA, broadcast the cluster info.
+            self.logger.info(f"RA {self.ra_id} instantiates the lead resource")
+        else:
+            self.logger.info(f"RA {self.ra_id} instantiates normal resource")
+	    # Ze: it is not lead resource, create a VM, join the cluster
 
 
 
@@ -620,3 +712,37 @@ class ResourceAgent:
             "provider": self.credentials.get('provider'),
             "capacity_loaded": bool(self.capacity)
         }
+"""
+        msg_resource_request_ra = {
+                "job_id": job_id,
+                "hub_ra": self.peer.peer_id,
+                "lead_resource": True, 
+                "timestamp": message.get('timestamp'),
+		"instance": [{
+  "nodes": [
+    {
+        "cloud": "aws",
+        "instance_type": "t2.small",
+        "ssh_key_name": "g",
+        "ssh_user": "ec2-user",
+        "k3s_role": "master",
+        "ssh_private_key_path": "/home/ubuntu/test/g.pem",
+        "ami": "ami-00ca32bbc84273381"
+    }
+]}]
+                }
+"""
+"""
+        aws_cloud_us = {
+  "nodes": [
+    {
+        "cloud": "aws",
+        "instance_type": "t2.small",
+        "ssh_key_name": "g",
+        "ssh_user": "ec2-user",
+        "k3s_role": "worker",
+        "ssh_private_key_path": "/home/ubuntu/test/g.pem",
+        "ami": "ami-00ca32bbc84273381"
+    }
+]}
+"""
