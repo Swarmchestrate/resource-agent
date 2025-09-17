@@ -33,6 +33,7 @@ class ResourceAgent:
         self.job_responses = {}
         # job_offer stores the offer that fulfills a job request [job_id][]
         self.job_offers = {}
+        self.master_info = {}
         # Extract configuration values
         self.ra_id = self.config.get('RA_id')
         self.universe_id = self.config.get('universe_id')
@@ -119,6 +120,7 @@ class ResourceAgent:
         self.peer.register_message_handler("MSG_JOB_BROADCAST", self._handle_job_broadcast)
         self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
         self.peer.register_message_handler("MSG_CREATE_RESOURCE", self._handle_create_resource)
+        self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info)
 
     def _handle_submit(self, peer_id: str, message: Dict[str, Any]):
         """Handle job submission requests"""
@@ -409,29 +411,32 @@ class ResourceAgent:
 
         # Check if all RAs have responded
         all_ras = self.peer.find_peers({"peer_type": "RA"})
-        print(f"the length of all_ras is {all_ras}, the number of received reponses is {len(self.job_responses.get(job_id, {}))}")
         if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
             # Ze: at here, LRA compiles all possible offers based on responses.
             self._compile_and_display_results(job_id)
         if job_id not in self.job_offers:
             logging.error("No resources are available for job %s", job_id)
             return None
+
         # Ze: randomly select a resource's RA node as LR
         LR_index = random.randint(0, len(self.job_offers[job_id]) - 1)+1
-        print(f"LR_index is {LR_index}")
         selected_resource = f"resource{LR_index}"
         LR_id = self.job_offers[job_id][selected_resource]["ra_id"]
+        provider = self.job_offers[job_id][selected_resource]["provider"]
+        instance_type = self.job_offers[job_id][selected_resource]["instance_type"]
+
         print(f"LR_index is {LR_index}, LR_id is {LR_id}, selected_resource is {self.job_offers[job_id][selected_resource]}")
-	# Ze-TODO: define msg send to a RA such that it can use it to create a VM.
-      #  master_node = '{ "cloud": "edge","edge_device_ip": "18.130.228.103", "ssh_user": "ubuntu", "ssh_auth_method": "key", "ssh_private_key": "/home/ubuntu/test/g.pem","k3s_role": "master"}'
- 
-        #master_node = '{ "cloud": "aws","instance_type": "t2.micro","ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/test/g.pem","ami": "ami-00ca32bbc84273381"}'
-        #master_node = json.loads(master_node)
-        #swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-        #outputs = swarmchestrate.add_node(master_node)
-        #print(f"Output from master node is: {outputs}")
+	# Ze-TODO: define msg send to the RA which hosts the LR.
+        msg_resource_request_ra = {
+                "job_id": job_id,
+                "hub_ra": self.peer.peer_id,
+                "lead_resource": True, 
+                "timestamp": message.get('timestamp'),
+                "instance": { "instance_type": instance_type ,"k3s_role": "master","node-name": "lsa"}
+                #"instance": { "cloud": provider ,"instance_type": instance_type ,"ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/test/g.pem","ami": "ami-00ca32bbc84273381"}
+        }
         
-#        self.peer.send(LR_id, "MSG_CREATE_RESOURCE", msg_resource_request_ra)
+        self.peer.send(LR_id, "MSG_CREATE_RESOURCE", msg_resource_request_ra)
         self.logger.info(f"Sent resource request to RA: {LR_id}")
 
 
@@ -625,7 +630,7 @@ class ResourceAgent:
             for i, resource_name in enumerate(resource_names):
                 provider_info = combination_tuple[i]
                 response = provider_info['response']
-		# Ze: combination info
+		# Ze: a combination is the resource fulfillment
                 combination[resource_name] = {
                     'ra_id': provider_info['ra_id'],
                     'provider': provider_info['provider'],
@@ -645,18 +650,142 @@ class ResourceAgent:
         """Process create resource request from LRA"""
         self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
         job_id = message.get('job_id')
+
         LR = message.get('lead_resource')
-        print(f"LR is {LR}")
         instance = message.get('instance', {})
-	# Ze-TODO: finish the following
+        instance_type = instance["instance_type"]
+        #node_name = instance["node_name"]
+
+        print(f"instance is {instance}")
+	# Ze-TODO: finish the RA which receives the msg and to create a VM
+	# !!! What info is required is important
         if(LR):
 	    # Ze: if it is the lead resource, it creates the LR VM, k3s cluster, deploy LSA, broadcast the cluster info.
+            # Ze-TODO; make sure them can be corrected loaded on all clouds (sztaki, edge, aws_us)
+
+
+            master_node = (
+                f'{{"cloud": "aws","instance_type": "{instance_type}","ssh_key_name": "g", "resource_name":"lsa",'
+                f'"ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/.ssh/Ze_mac.pem",'
+                #f'"ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/test/g.pem",'
+                f'"ami": "ami-00ca32bbc84273381"}}'
+            )
+            master_node = json.loads(master_node)
+
+            swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+            outputs = swarmchestrate.add_node(master_node)
+
+            k3s_token = outputs.get("k3s_token")
+            cluster_name = outputs.get("cluster_name")
+            master_ip = outputs.get("master_ip")
+            node_name = outputs.get("node_name")
+            # Ze-TODO 1) : deploy LSA, based on master_node, LSA should be able to load config files.
+            # Ze-TODO 1a): prepare manifests:
+	    # 1. ip address of the hub_ra
+            # 2. node name of each resource
+            # 3. image of application 
+	    # application's tosca into SA's expected toscas and store them in config-map.
+            manifest_cfg = (
+                f'{{"manifest_folder": "/home/ubuntu/repo/swarm-agent/k3s",'
+                f'"master_ip": "{master_ip}",'
+                f'"ssh_key_path": "/home/ubuntu/.ssh/Ze_mac.pem",'
+                f'"ssh_user": "ec2-user"}}'
+            )
+            # Load configuration
+            cfg = json.loads(manifest_cfg)
+
+            manifest_folder = Path(cfg["manifest_folder"])
+            manifest_folder.exists() or exit(f"❌ Manifest folder does not exist: {manifest_folder}")
+
+            # Run copy-manifest
+            Swarmchestrate(template_dir="templates", output_dir="output").deploy_manifests(
+            manifest_folder=str(manifest_folder),
+            master_ip=cfg["master_ip"],
+            ssh_key_path=cfg["ssh_key_path"],
+            ssh_user=cfg["ssh_user"]
+            )
+            # Ze-(DONE) 2) ) : prepare master_output and send back to ra_hub.
+            msg_master_info = {
+                "job_id": job_id,
+                "hub_ra": self.peer.peer_id,
+                "lead_resource": True, 
+                "timestamp": message.get('timestamp'),
+                "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip, "node-name": node_name}
+            }
+        
+            self.peer.send(peer_id, "MSG_MASTER_INFO", msg_master_info)
+
+            print(f"Output from master node is: {outputs}")
             self.logger.info(f"RA {self.ra_id} instantiates the lead resource")
         else:
             self.logger.info(f"RA {self.ra_id} instantiates normal resource")
 	    # Ze: it is not lead resource, create a VM, join the cluster
+            master_node = f'{ "cloud": {provider}","instance_type": {instance['instance_type']},"ssh_key_name": "g","ssh_user": {ssh_user},"k3s_role": "master","ssh_private_key_path": {ssh_private_key_path},"ami": {ami}}'
 
 
+    def _handle_resource_request(self, peer_id, message):
+        """Process resource request from SA"""
+        self.logger.info(f"RA {self.ra_id} receives resource request from {peer_id}")
+
+	# Ze-TODO 3) : SA should just send resource 1/2/3.... 
+	# LRA should identify the provider, the instance, and so on so forth
+        resource_index = message.get('resource_index')
+        sa_requested_resource = f"resource{resource_index}"
+
+        ra_id = self.job_offers[job_id][sa_requested_resource]["ra_id"]
+        provider = self.job_offers[job_id][sa_requested_resource]["provider"]
+        instance_type = self.job_offers[job_id][sa_requested_resource]["instance_type"]
+
+	# Ze-TODO: define msg send to a RA such that it can use it to create a VM.
+        msg_resource_request_ra = {
+                "job_id": job_id,
+                "hub_ra": self.peer.peer_id,
+                "lead_resource": True, 
+                "timestamp": message.get('timestamp'),
+                "instance": { "cloud": provider ,"instance_type": instance_type ,"k3s_role": "worker"}
+        }
+ 
+        self.peer.send(ra_id, "MSG_CREATE_RESOURCE", msg_resource_request_ra)
+        self.logger.info(f"Sent resource request to RA: {LR_id}")
+
+
+    def _handle_master_info(self, peer_id, message):
+        """Process master info output from LR"""
+
+        self.logger.info(f"RA {self.ra_id} receives master info output from LR: {peer_id}")
+        self.master_info = message.get('master_info')
+
+        cluster_name = self.master_info["cluster_name"]
+        master_ip = self.master_info["master_ip"]
+        k3s_token = self.master_info["k3s_token"]
+
+        #Ze-TODO: this is just a try out to add the edge node as a worker
+        worker_node_aws = (
+                f'{{"cloud": "edge","edge_device_ip": "18.130.228.103", "resource_name":"sa-1",'
+                f'"ssh_user": "ubuntu","k3s_role": "worker","ssh_private_key": "/home/ubuntu/.ssh/Ze_mac.pem",'
+                f'"ssh_auth_method": "key",'
+                f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
+        )
+
+        worker_node_sztaki = (
+                f'{{"cloud": "openstack","openstack_image_id": "b2be6f4e-ebd8-42af-a526-63691a4d90ea",'
+                f'"openstack_flavor_id": "m2.small",'
+                f'"ssh_key_name": "Ze_mac",'
+                f'"volume_size": "10",'
+                f'"k3s_role": "worker",'
+                f'"ha": false,'
+                f'"ssh_user": "ubuntu",'
+                f'"ssh_private_key_path": "/home/ubuntu/.ssh/Ze_mac.pem",'
+                f'"floating_ip_pool": "ext-net",'
+                f'"network_id": "bbe042e4-91a1-4601-962f-14a31e5e2787",'
+                f'"use_block_device": true, "resource_name":"sa-1",'
+                f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
+        )
+        worker_node = json.loads(worker_node_sztaki)
+        swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+        outputs = swarmchestrate.add_node(worker_node)
+
+        print(f"worker_node {worker_node}")
 
 
     def connect_to_network(self):
@@ -745,4 +874,46 @@ class ResourceAgent:
         "ami": "ami-00ca32bbc84273381"
     }
 ]}
+"""
+# Ze-Reference
+        #"instance": '{ "cloud": "edge","edge_device_ip": "18.130.228.103", "ssh_user": "ubuntu", "ssh_auth_method": "key", "ssh_private_key": "/home/ubuntu/test/g.pem","k3s_role": "master"}'
+#        master_node = '{ "cloud": "aws","instance_type": "t2.micro","ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/test/g.pem","ami": "ami-00ca32bbc84273381"}'
+
+"""
+# Ze-TODO 1a): prepare manifests: application's tosca into SA's expected toscas and store them in config-map.
+            manifest_cfg = (
+                f'{{"manifest_folder": "/home/ubuntu/swarm-agent/k3s",'
+                f'"master_ip": "{master_ip}",'
+                f'"ssh_key_path": "/home/ubuntu/test/g.pem",'
+                f'"ssh_user": "ec2-user"}}'
+            )
+            # Load configuration
+            cfg = json.loads(manifest_cfg)
+
+            manifest_folder = Path(cfg["manifest_folder"])
+            manifest_folder.exists() or exit(f"❌ Manifest folder does not exist: {manifest_folder}")
+
+            # Run copy-manifest
+            Swarmchestrate(template_dir="templates", output_dir="output").deploy_manifests(
+            manifest_folder=str(manifest_folder),
+            master_ip=cfg["master_ip"],
+            ssh_key_path=cfg["ssh_key_path"],
+            ssh_user=cfg["ssh_user"]
+            )
+# sztaki openstack
+        worker_node = (
+                f'{{"cloud": "openstack","openstack_image_id": "b2be6f4e-ebd8-42af-a526-63691a4d90ea",'
+                f'"openstack_flavor_id": "m2.small",'
+                f'"ssh_key_name": "test",'
+                f'"volume_size": "10",'
+                f'"k3s_role": "worker",'
+                f'"ha": false,'
+                f'"ssh_user": "ubuntu",'
+                f'"ssh_private_key_path": "/home/ubuntu/test/g.pem",'
+                f'"floating_ip_pool": "ext-net",'
+                f'"network_id": "bbe042e4-91a1-4601-962f-14a31e5e2787",'
+                f'"use_block_device": true,'
+                f'"security_group_id": "f05b97f0-140a-4d24-bfc6-3a197e842739",'
+                f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
+        )
 """
