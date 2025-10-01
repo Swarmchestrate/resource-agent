@@ -2,6 +2,9 @@
 Base Resource Agent (RA) implementation
 Handles P2P communication and resource matching
 """
+#import
+from dotenv import load_dotenv
+ 
 import json
 import logging
 import yaml
@@ -49,6 +52,7 @@ class ResourceAgent:
 
         # Setup logging
         self._setup_logging()
+        load_dotenv()
 
     def _load_config(self, config_file: str) -> Dict[str, Any]:
         """Load configuration from YAML file"""
@@ -171,19 +175,19 @@ class ResourceAgent:
 
     def _handle_job_submit(self, peer_id: str, message: Dict[str, Any]):
         """Handle job submission from client - Hub RA only"""
-        self.logger.info(f"Received job submission from {peer_id}")
+        self.logger.info(f"Received application submission from {peer_id}")
 
         job_id = message.get('job_id')
         ask_yaml = message.get('ask_yaml')
         client_id = message.get('client_id')
         all_ras = self.peer.find_peers({"peer_type": "RA"})
         if not ask_yaml:
-            self.logger.error("No ask_yaml data in job submission")
+            self.logger.error("No ask_yaml data in application submission")
             return
 
         # Hub RA processes and broadcasts job
         if not self.bootstrap_peers:
-            self.logger.info(f"Broadcasting job {job_id} to all RAs")
+            self.logger.info(f"Broadcasting application {job_id} to all RAs")
 
             # Find all other RAs in network
             all_ras = self.peer.find_peers({"peer_type": "RA"})
@@ -201,7 +205,7 @@ class ResourceAgent:
             # Broadcast to all other RAs
             for ra_id in other_ras:
                 self.peer.send(ra_id, "MSG_JOB_BROADCAST", broadcast_message)
-                self.logger.info(f"Broadcasted job to {ra_id}")
+                self.logger.info(f"Broadcasted application to {ra_id}")
 
             # Process locally as well
             self._process_job_requirements(job_id, client_id, ask_yaml, self.ra_id)
@@ -210,7 +214,7 @@ class ResourceAgent:
 
     def _handle_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Handle job broadcast from hub RA"""
-        self.logger.info(f"Received job broadcast from hub {peer_id}")
+        self.logger.info(f"Received application resource requirement broadcast from hub {peer_id}")
 
         job_id = message.get('job_id')
         client_id = message.get('client_id')
@@ -223,7 +227,7 @@ class ResourceAgent:
 
     def _process_job_requirements(self, job_id: str, client_id: str, ask_yaml: Dict, hub_ra: str):
         """Process job requirements against RA capacity"""
-        self.logger.info(f"RA: {self.ra_id} Evaluating job {job_id} requirements")
+        self.logger.info(f"RA: {self.ra_id} Evaluating application {job_id} requirements")
 
         if not self.capacity:
             self.logger.warning("No capacity data available for evaluation")
@@ -236,7 +240,7 @@ class ResourceAgent:
             if not isinstance(resource_requirements, dict):
                 continue
 
-            self.logger.info(f"Evaluating requirements for {resource_name}")
+            self.logger.info(f"Evaluating application resource requirements for {resource_name}")
 
             # Extract requirements and metadata
             capabilities = resource_requirements.get('capabilities', {})
@@ -311,6 +315,9 @@ class ResourceAgent:
     def _verify_quota(self, suitable_instances: List[str], count: int) -> bool:
         """Verify quota availability for instances"""
         our_quota = self.capacity.get('capacity', {}).get('instances_quota', {})
+         # ADDED: Handle flat structure - if no quota defined, assume single instance
+        if not our_quota and 'single-config' in suitable_instances:
+            return count <= 1
 
         for instance_type in suitable_instances:
             available_quota = our_quota.get(instance_type, 0)
@@ -330,9 +337,33 @@ class ResourceAgent:
         # Find most cost-effective instance
         # Ze-DONE: we should use the smallest instance that fulfills the requirements.
         our_pricing = self.capacity.get('pricing', {})
-        best_instance = min(suitable_instances, key=lambda x: our_pricing.get(x, float('inf')))
-        best_cost = our_pricing.get(best_instance, 0)
-
+        
+        # ADDED: Handle flat structure pricing
+        if isinstance(our_pricing, (int, float)):
+            best_cost = float(our_pricing)
+            best_instance = 'single-config'
+            our_capacity = self.capacity.get('capacity', {})
+            energy = our_capacity.get('energy-consumption', 0)
+            bandwidth = our_capacity.get('bandwidth', 0)
+        elif isinstance(our_pricing, str):
+            best_cost = float(our_pricing.replace('$', '').strip())
+            best_instance = 'single-config'
+            our_capacity = self.capacity.get('capacity', {})
+            energy = our_capacity.get('energy-consumption', 0)
+            bandwidth = our_capacity.get('bandwidth', 0)
+        else:
+            # Original instances logic
+            best_instance = min(suitable_instances, key=lambda x: our_pricing.get(x, float('inf')))
+            best_cost = our_pricing.get(best_instance, 0)
+            # Check if it's still a flat structure selected
+            if best_instance == 'single-config':
+                our_capacity = self.capacity.get('capacity', {})
+                energy = our_capacity.get('energy-consumption', 0)
+                bandwidth = our_capacity.get('bandwidth', 0)
+            else:
+                energy = self.capacity['capacity']['instances'][best_instance]['energy-consumption']
+                bandwidth = self.capacity['capacity']['instances'][best_instance]['bandwidth']
+        
         return {
             "instance_type": best_instance,
             "cost_per_hour": best_cost,
@@ -341,8 +372,10 @@ class ResourceAgent:
             "count": count,
             "setup_fee": 0,
             "minimum_duration": "1 hour",
-            "energy-consumption": self.capacity['capacity']['instances'][best_instance]['energy-consumption'],
-            "bandwidth": self.capacity['capacity']['instances'][best_instance]['bandwidth']
+            "energy-consumption": energy,
+            "bandwidth": bandwidth
+            #"energy-consumption": self.capacity['capacity']['instances'][best_instance]['energy-consumption'],
+            #"bandwidth": self.capacity['capacity']['instances'][best_instance]['bandwidth']
         }
 
     def _create_resource_definition(self, resource_name: str, capabilities: Dict, count: int) -> Dict:
@@ -353,7 +386,11 @@ class ResourceAgent:
 
         best_instance = suitable_instances[0]
         our_instances = self.capacity.get('capacity', {}).get('instances', {})
-        matched_specs = our_instances.get(best_instance, {}).copy()
+        # ADDED: Handle flat structure
+        if not our_instances and best_instance == 'single-config':
+            matched_specs = self.capacity.get('capacity', {}).copy()
+        else:
+            matched_specs = our_instances.get(best_instance, {}).copy()
         matched_specs['instance_type'] = best_instance
 
         return {
@@ -378,12 +415,28 @@ class ResourceAgent:
         our_pricing = self.capacity.get('pricing', {})
 
         matching = {}
-        for instance_type in suitable_instances:
-            matching[instance_type] = {
-                "specifications": our_instances.get(instance_type, {}),
-                "available_quota": our_quota.get(instance_type, 0),
-                "cost_per_hour": our_pricing.get(instance_type, 0)
+        # ADDED: Handle flat structure
+        if 'single-config' in suitable_instances:
+            capacity_section = self.capacity.get('capacity', {})
+            price = our_pricing if isinstance(our_pricing, (int, float)) else 0
+            if isinstance(our_pricing, str):
+                price = float(our_pricing.replace('$', '').strip())
+            
+            matching['single-config'] = {
+                "specifications": capacity_section,
+                "available_quota": 1,
+                "cost_per_hour": price,
+                "energy-consumption": capacity_section.get('energy-consumption', 0),
+                "bandwidth": capacity_section.get('bandwidth', 0)
             }
+        else:
+            # Original instances logic
+            for instance_type in suitable_instances:
+                matching[instance_type] = {
+                    "specifications": our_instances.get(instance_type, {}),
+                    "available_quota": our_quota.get(instance_type, 0),
+                    "cost_per_hour": our_pricing.get(instance_type, 0)
+                }
 
         return matching
 
@@ -401,6 +454,12 @@ class ResourceAgent:
         provider = message.get('provider')
         responses = message.get('responses', {})
 
+        #print("11111111111111111111111111111111111111")
+        len_res = len(responses)
+        #print(f"len is {len_res}")
+        #print("11111111111111111111111111111111111111")
+        #print(f"message is: {message}")
+
         if job_id not in self.job_responses:
             self.job_responses[job_id] = {}
 
@@ -411,29 +470,46 @@ class ResourceAgent:
 
         # Check if all RAs have responded
         all_ras = self.peer.find_peers({"peer_type": "RA"})
+        #if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
         if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
             # Ze: at here, LRA compiles all possible offers based on responses.
             self._compile_and_display_results(job_id)
+        # Amjad: appeared also if there are offers. temporary commenting
         if job_id not in self.job_offers:
-            logging.error("No resources are available for job %s", job_id)
+        #    logging.error("No resources are available for application %s", job_id)
             return None
-
+        
+        # ADDED: Check if job_offers[job_id] is None (no valid combinations)
+        if self.job_offers[job_id] is None:
+            logging.error("No valid resource combinations for application %s", job_id)
+            return None 
         # Ze: randomly select a resource's RA node as LR
-        LR_index = random.randint(0, len(self.job_offers[job_id]) - 1)+1
-        selected_resource = f"resource{LR_index}"
+        #print("22222222222222222")
+        #print(f"{self.job_offers[job_id]}")
+        #selected_resource = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-sztaki-cloud-hu'), None)
+        selected_resource = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
+
+#        selected_keys = [k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us']
+        #print(selected_resource)
+        #LR_index = random.randint(0, len(self.job_offers[job_id]) - 1)+1
+        #selected_resource = f"resource{LR_index}"
+        # a list stores all {"web1","web2"} -> list_name[LR_index]  
         LR_id = self.job_offers[job_id][selected_resource]["ra_id"]
         provider = self.job_offers[job_id][selected_resource]["provider"]
         instance_type = self.job_offers[job_id][selected_resource]["instance_type"]
 
-        print(f"LR_index is {LR_index}, LR_id is {LR_id}, selected_resource is {self.job_offers[job_id][selected_resource]}")
-	# Ze-TODO: define msg send to the RA which hosts the LR.
+        #print(f"LR_index is {LR_index}, LR_id is {LR_id}, selected_resource is {self.job_offers[job_id][selected_resource]}")
+        print("Press a key to continue:")
+        key_to_continue = input()
+
+	# Ze-DONE: define msg and send it to the RA which will instantiate the LR.
         msg_resource_request_ra = {
                 "job_id": job_id,
                 "hub_ra": self.peer.peer_id,
                 "lead_resource": True, 
                 "timestamp": message.get('timestamp'),
-                "instance": { "instance_type": instance_type ,"k3s_role": "master","node-name": "lsa"}
-                #"instance": { "cloud": provider ,"instance_type": instance_type ,"ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/test/g.pem","ami": "ami-00ca32bbc84273381"}
+                "instance": { "instance_type": instance_type ,"k3s_role": "master","node-name": "lead-worker"}
+                #"instance": { "cloud": provider ,"instance_type": instance_type ,"ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "","ami": "ami-00ca32bbc84273381"}
         }
         
         self.peer.send(LR_id, "MSG_CREATE_RESOURCE", msg_resource_request_ra)
@@ -465,7 +541,7 @@ class ResourceAgent:
         print("-" * 60)
         
         # Create table header
-        header = f"{'RA (Provider)':<20}"
+        header = f"{'RA (Provider)':<30}"
         for resource_name in resource_names:
             header += f"{resource_name.title():<15}"
         print(header)
@@ -476,7 +552,7 @@ class ResourceAgent:
             provider = ra_data['provider']
             responses = ra_data['responses']
 
-            row = f"{ra_id} ({provider})"[:19].ljust(20)
+            row = f"{ra_id} ({provider})"[:29].ljust(30)
             for resource_name in resource_names:
                 answer = responses.get(resource_name, {}).get('answer', 'N/A')
                 row += f"{answer}"[:14].ljust(15)
@@ -518,7 +594,7 @@ class ResourceAgent:
             #selected_index = random.randint(0, len(valid_combinations) - 1)
             selected_combination = valid_combinations[selected_index]
             
-            print(f"\nSELECTED OFFER (Randomly chosen: #{selected_index + 1}):")
+            print(f"\nSELECTED OFFER (chosen by the ranking algorithm: #{selected_index + 1}):")
             print("=" * 60)
             
             resource_items = []
@@ -630,7 +706,7 @@ class ResourceAgent:
             for i, resource_name in enumerate(resource_names):
                 provider_info = combination_tuple[i]
                 response = provider_info['response']
-		# Ze: a combination is the resource fulfillment
+		# Ze: a combination is an offer that fulfills all resources
                 combination[resource_name] = {
                     'ra_id': provider_info['ra_id'],
                     'provider': provider_info['provider'],
@@ -658,16 +734,20 @@ class ResourceAgent:
 
         print(f"instance is {instance}")
 	# Ze-TODO: finish the RA which receives the msg and to create a VM
-	# !!! What info is required is important
         if(LR):
-	    # Ze: if it is the lead resource, it creates the LR VM, k3s cluster, deploy LSA, broadcast the cluster info.
+	    # Ze: if it is the lead resource, it creates the LR VM, k3s cluster, deploy LSA, send the cluster info to the main RA.
             # Ze-TODO; make sure them can be corrected loaded on all clouds (sztaki, edge, aws_us)
 
-
+            # Cluster-builder LSA Step 1
             master_node = (
-                f'{{"cloud": "aws","instance_type": "{instance_type}","ssh_key_name": "g", "resource_name":"lsa",'
-                f'"ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/.ssh/Ze_mac.pem",'
-                #f'"ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/test/g.pem",'
+                f'{{"cloud": "aws",'
+                f'"instance_type": "{instance_type}",'
+                f'"ssh_key_name": "",'
+                f'"resource_name":"lead-worker",'
+#               f'"ssh_user": "ec2-user",'
+                f'"k3s_role": "master",'
+                f'"ssh_private_key_path": "",'
+                f'"security_group_id": "sg-091151edd2cd8cdf8",'
                 f'"ami": "ami-00ca32bbc84273381"}}'
             )
             master_node = json.loads(master_node)
@@ -678,17 +758,35 @@ class ResourceAgent:
             k3s_token = outputs.get("k3s_token")
             cluster_name = outputs.get("cluster_name")
             master_ip = outputs.get("master_ip")
-            node_name = outputs.get("node_name")
+        #    node_name = outputs.get("node_name")
             # Ze-TODO 1) : deploy LSA, based on master_node, LSA should be able to load config files.
             # Ze-TODO 1a): prepare manifests:
 	    # 1. ip address of the hub_ra
             # 2. node name of each resource
             # 3. image of application 
 	    # application's tosca into SA's expected toscas and store them in config-map.
+
+# Cluster configuration for testing
+            registry_config = {
+                "master_ip": master_ip,
+                "ssh_user": "ec2-user",
+                "ssh_private_key_path": "",
+                "secret_names": ["regcred"] #optional
+                #"namespace":"test" , #optional
+            }
+ 
+# Run the registry secret creation
+            swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+            swarmchestrate.create_registry_secrets(registry_config)
+
+
+            ### Cluster-builder LSA Step 2 Manifest
+
+            # Preprocess cluster-builder copy-manifest
             manifest_cfg = (
-                f'{{"manifest_folder": "/home/ubuntu/repo/swarm-agent/k3s",'
+                f'{{"manifest_folder": "/home/ubuntu/swarm-agent/k3s",'
                 f'"master_ip": "{master_ip}",'
-                f'"ssh_key_path": "/home/ubuntu/.ssh/Ze_mac.pem",'
+                f'"ssh_key_path": "",'
                 f'"ssh_user": "ec2-user"}}'
             )
             # Load configuration
@@ -697,20 +795,24 @@ class ResourceAgent:
             manifest_folder = Path(cfg["manifest_folder"])
             manifest_folder.exists() or exit(f"❌ Manifest folder does not exist: {manifest_folder}")
 
-            # Run copy-manifest
+            # Run cluster-builder copy-manifest: this copy paste manifests of system components, e.g., SA, k3s-dashboard to the LR.
             Swarmchestrate(template_dir="templates", output_dir="output").deploy_manifests(
             manifest_folder=str(manifest_folder),
             master_ip=cfg["master_ip"],
             ssh_key_path=cfg["ssh_key_path"],
             ssh_user=cfg["ssh_user"]
             )
+
+
+
+            ### Cluster-builder LSA Step 3 send back info
             # Ze-(DONE) 2) ) : prepare master_output and send back to ra_hub.
             msg_master_info = {
                 "job_id": job_id,
                 "hub_ra": self.peer.peer_id,
                 "lead_resource": True, 
                 "timestamp": message.get('timestamp'),
-                "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip, "node-name": node_name}
+                "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip}
             }
         
             self.peer.send(peer_id, "MSG_MASTER_INFO", msg_master_info)
@@ -720,7 +822,7 @@ class ResourceAgent:
         else:
             self.logger.info(f"RA {self.ra_id} instantiates normal resource")
 	    # Ze: it is not lead resource, create a VM, join the cluster
-            master_node = f'{ "cloud": {provider}","instance_type": {instance['instance_type']},"ssh_key_name": "g","ssh_user": {ssh_user},"k3s_role": "master","ssh_private_key_path": {ssh_private_key_path},"ami": {ami}}'
+            master_node = f'{ "cloud": {provider}","instance_type": {instance['instance_type']},"ssh_key_name": "","ssh_user": {ssh_user},"k3s_role": "master","ssh_private_key_path": {ssh_private_key_path},"ami": {ami}}'
 
 
     def _handle_resource_request(self, peer_id, message):
@@ -729,6 +831,7 @@ class ResourceAgent:
 
 	# Ze-TODO 3) : SA should just send resource 1/2/3.... 
 	# LRA should identify the provider, the instance, and so on so forth
+        print(f"Message is \n {message}")
         resource_index = message.get('resource_index')
         sa_requested_resource = f"resource{resource_index}"
 
@@ -761,38 +864,57 @@ class ResourceAgent:
 
         #Ze-TODO: this is just a try out to add the edge node as a worker
         worker_node_aws = (
-                f'{{"cloud": "edge","edge_device_ip": "18.130.228.103", "resource_name":"sa-1",'
-                f'"ssh_user": "ubuntu","k3s_role": "worker","ssh_private_key": "/home/ubuntu/.ssh/Ze_mac.pem",'
+                f'{{"cloud": "edge","edge_device_ip": "", "resource_name":"worker-node-1",'
+                f'"ssh_user": "ubuntu","k3s_role": "worker","ssh_private_key": "",'
                 f'"ssh_auth_method": "key",'
                 f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
         )
 
         worker_node_sztaki = (
-                f'{{"cloud": "openstack","openstack_image_id": "b2be6f4e-ebd8-42af-a526-63691a4d90ea",'
+                f'{{"cloud": "openstack","openstack_image_id": "",'
                 f'"openstack_flavor_id": "m2.small",'
-                f'"ssh_key_name": "Ze_mac",'
+                f'"ssh_key_name": "",'
                 f'"volume_size": "10",'
                 f'"k3s_role": "worker",'
                 f'"ha": false,'
                 f'"ssh_user": "ubuntu",'
-                f'"ssh_private_key_path": "/home/ubuntu/.ssh/Ze_mac.pem",'
+                f'"ssh_private_key_path": "",'
                 f'"floating_ip_pool": "ext-net",'
-                f'"network_id": "bbe042e4-91a1-4601-962f-14a31e5e2787",'
-                f'"use_block_device": true, "resource_name":"sa-1",'
+                f'"network_id": "",'
+                f'"use_block_device": true,'
+                f'"resource_name":"worker-node-1",'
+                f'"security_group_id": "",'
                 f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
         )
-        worker_node = json.loads(worker_node_sztaki)
+        worker_node_edge = (
+                f'{{"cloud": "edge","edge_device_ip": "", "resource_name":"worker-node-1",'
+                f'"ssh_user": "ubuntu","k3s_role": "worker","ssh_private_key": "",'
+                f'"ssh_auth_method": "key",'
+                f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
+        )
+        worker_node = json.loads(worker_node_edge)
         swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
         outputs = swarmchestrate.add_node(worker_node)
 
-        print(f"worker_node {worker_node}")
+# Cluster configuration for testing
+#        registry_config = {
+#            "master_ip": master_ip,
+#            "ssh_user": "ubuntu",
+#            "ssh_private_key_path": "",
+#            "secret_names": [""], #optional
+#            "namespace":"test" , #optional
+#        }
+ 
+# Run the registry secret creation
+#        swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+#        swarmchestrate.create_registry_secrets(registry_config)
+#        print(f"worker_node {worker_node}")
 
 
     def connect_to_network(self):
         """Connect to P2P network using bootstrap peers"""
         if not self.bootstrap_peers:
             self.logger.info("No bootstrap peers configured - running as hub")
-            #self.peer.enter("172.31.40.7", 5000)
             return
 
         # Connect to configured bootstrap peers
@@ -841,79 +963,3 @@ class ResourceAgent:
             "provider": self.credentials.get('provider'),
             "capacity_loaded": bool(self.capacity)
         }
-"""
-        msg_resource_request_ra = {
-                "job_id": job_id,
-                "hub_ra": self.peer.peer_id,
-                "lead_resource": True, 
-                "timestamp": message.get('timestamp'),
-		"instance": [{
-  "nodes": [
-    {
-        "cloud": "aws",
-        "instance_type": "t2.small",
-        "ssh_key_name": "g",
-        "ssh_user": "ec2-user",
-        "k3s_role": "master",
-        "ssh_private_key_path": "/home/ubuntu/test/g.pem",
-        "ami": "ami-00ca32bbc84273381"
-    }
-]}]
-                }
-"""
-"""
-        aws_cloud_us = {
-  "nodes": [
-    {
-        "cloud": "aws",
-        "instance_type": "t2.small",
-        "ssh_key_name": "g",
-        "ssh_user": "ec2-user",
-        "k3s_role": "worker",
-        "ssh_private_key_path": "/home/ubuntu/test/g.pem",
-        "ami": "ami-00ca32bbc84273381"
-    }
-]}
-"""
-# Ze-Reference
-        #"instance": '{ "cloud": "edge","edge_device_ip": "18.130.228.103", "ssh_user": "ubuntu", "ssh_auth_method": "key", "ssh_private_key": "/home/ubuntu/test/g.pem","k3s_role": "master"}'
-#        master_node = '{ "cloud": "aws","instance_type": "t2.micro","ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "/home/ubuntu/test/g.pem","ami": "ami-00ca32bbc84273381"}'
-
-"""
-# Ze-TODO 1a): prepare manifests: application's tosca into SA's expected toscas and store them in config-map.
-            manifest_cfg = (
-                f'{{"manifest_folder": "/home/ubuntu/swarm-agent/k3s",'
-                f'"master_ip": "{master_ip}",'
-                f'"ssh_key_path": "/home/ubuntu/test/g.pem",'
-                f'"ssh_user": "ec2-user"}}'
-            )
-            # Load configuration
-            cfg = json.loads(manifest_cfg)
-
-            manifest_folder = Path(cfg["manifest_folder"])
-            manifest_folder.exists() or exit(f"❌ Manifest folder does not exist: {manifest_folder}")
-
-            # Run copy-manifest
-            Swarmchestrate(template_dir="templates", output_dir="output").deploy_manifests(
-            manifest_folder=str(manifest_folder),
-            master_ip=cfg["master_ip"],
-            ssh_key_path=cfg["ssh_key_path"],
-            ssh_user=cfg["ssh_user"]
-            )
-# sztaki openstack
-        worker_node = (
-                f'{{"cloud": "openstack","openstack_image_id": "b2be6f4e-ebd8-42af-a526-63691a4d90ea",'
-                f'"openstack_flavor_id": "m2.small",'
-                f'"ssh_key_name": "test",'
-                f'"volume_size": "10",'
-                f'"k3s_role": "worker",'
-                f'"ha": false,'
-                f'"ssh_user": "ubuntu",'
-                f'"ssh_private_key_path": "/home/ubuntu/test/g.pem",'
-                f'"floating_ip_pool": "ext-net",'
-                f'"network_id": "bbe042e4-91a1-4601-962f-14a31e5e2787",'
-                f'"use_block_device": true,'
-                f'"security_group_id": "f05b97f0-140a-4d24-bfc6-3a197e842739",'
-                f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
-        )
-"""

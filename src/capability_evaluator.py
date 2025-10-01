@@ -22,8 +22,9 @@ def can_fulfill_requirement(ask_requirements: dict, capacity_data: dict) -> bool
         if not properties:
             continue
         
+
         if not check_requirement_type_requirements(requirement_type, properties, capacity_data):
-            print(f"requirement_type: {requirement_type} not fulfilled, properties are:\n {properties}\n capacity of the RA are:\n {capacity_data} ")
+ #           print(f"requirement_type: {requirement_type} not fulfilled, properties are:\n {properties}\n capacity of the RA is:\n {capacity_data} ")
             return False
     
     return True
@@ -34,8 +35,17 @@ def check_requirement_type_requirements(requirement_type: str, properties: dict,
     
     if requirement_type == 'host':
         instances = find_in_capacity(capacity_data, ['capacity.instances', 'instances'])
+        # Handle flat structure (like AWS UK Edge)
         if not instances:
+            capacity_section = capacity_data.get('capacity', {})
+            # Check if this is a flat structure with host properties
+            if 'num-cpus' in capacity_section or 'mem-size' in capacity_section:
+                # Treat the whole capacity section as one instance
+                if check_instance_requirements(properties, capacity_section, capacity_data):
+                    return True
             return False
+
+        # Handle instances structure (like AWS Cloud and SZTAKI)
             
         for instance_name, instance_data in instances.items():
             if check_instance_requirements(properties, instance_data, capacity_data):
@@ -295,8 +305,6 @@ def check_value(requirement, capacity_value) -> bool:
         return requirement.lower() == capacity_value.lower()
     
     return requirement == capacity_value
-
-
 def parse_number(value) -> float:
     """Extract numeric value from strings like '16 GB' or '100 W'"""
     if isinstance(value, (int, float)):
@@ -309,13 +317,22 @@ def parse_number(value) -> float:
     
     return 0
 
-
 def get_matching_instances(capabilities: dict, capacity_data: dict) -> List[str]:
     """Get list of instances that match host requirements"""
     instances = capacity_data.get('capacity', {}).get('instances', {})
+    # Handle flat structure
     if not instances:
+        capacity_section = capacity_data.get('capacity', {})
+        if any(key in capacity_section for key in ['num-cpus', 'mem-size', 'disk-size']):
+            host_props = capabilities.get('host', {}).get('properties', {})
+            if not host_props:
+                return ['single-config']  # Changed from 'default'
+
+            if check_instance_requirements(host_props, capacity_section, capacity_data):
+                return ['single-config']  # Changed from 'default'
         return []
     
+    # Handle instances structure
     host_props = capabilities.get('host', {}).get('properties', {})
     if not host_props:
         return list(instances.keys())
