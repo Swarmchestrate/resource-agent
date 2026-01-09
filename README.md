@@ -30,17 +30,13 @@ python src/ra.py [arg1] [arg2]
 - `arg1` (Optional): Path to the RA configuration file. 
 - `arg2` (Optional): Path to the Capacity configuration file.
 
-  The templates of these config files are available in the config/ directory.
+  The templates of these config files are available in the config/ directory, arg1 template is ra-config.yaml and arg2 template is capacity-config.yaml.
 
 ### Resource selection jobs
 Run the Job submission client script to submit a request to select resources for a given application:
 
 ```bash
-python job_submission_client.py [arg1] [arg2] [arg3] [arg4] 
+python job_submission_client.py [arg1] 
 ```
 ### Arguments
-- `arg1` (Mandatory): Path to the YAML-based resource requirements file. An example template can be found in tosca/output/ask.yaml.
-- `arg2` (Mandatory): IP address of the RA to which the request is submitted.
-- `arg3` (Mandatory): Port number of the RA to which the request is submitted.
-- `arg4` (Mandatory): ID of Gateway RA to which job is submitted.
-
+- `arg1` (Mandatory): Path to the YAML-based file. An example template can be found in client/template.yaml.
