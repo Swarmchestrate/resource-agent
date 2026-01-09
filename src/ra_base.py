@@ -3,24 +3,43 @@ Base Resource Agent (RA) implementation
 Handles P2P communication and resource matching
 """
 #import
-from dotenv import load_dotenv
- 
+# unused imports removed
+
+            
+#import random
+
+import os as _os
+import shutil as _shutil
 import json
 import logging
 import yaml
 import time
+
+from http.client import responses
 from typing import Dict, Any, Optional, List
 from pathlib import Path
-from offer_evaluator import OfferEvaluator
-
-
-import random
 from itertools import product
 
+# Swarmchestrate library imports
 from swchp2pcom import SwchPeer
-from capability_evaluator import can_fulfill_requirement, get_matching_instances
-
 from cluster_builder import Swarmchestrate
+from sardou import Sardou
+
+# TOSCA evaluation functions
+from capability_evaluator import can_fulfill_requirement, get_matching_instances
+from offer_evaluator import OfferEvaluator
+
+# RA utility functions
+from dotenv import load_dotenv
+from utility import dict_to_yaml as write_yaml
+from utility import extract_qos_priorities as get_qos_priorities
+from utility import generate_tosca_configmap as write_tosca_configmap
+from utility import generate_swarm_configmap as write_swarm_configmap   
+
+
+
+
+
 
 
 class ResourceAgent:
@@ -32,11 +51,17 @@ class ResourceAgent:
         self.capacity_file = capacity_file
         self.config = self._load_config(config_file)
         self.capacity = self._load_config(capacity_file) if capacity_file else {}
-        # job_responses collect RAs' responses to a job request [job_id][responses]
-        self.job_responses = {}
-        # job_offer stores the offer that fulfills a job request [job_id][]
-        self.job_offers = {}
-        self.master_info = {}
+        
+        self.job_tosca = {} # store the tosca of each job [job_id]
+        self.job_states = {} # store the state of each job [job_id]{state: xxx}
+        self.job_responses = {} # store the resource responses from RAs for each job [job_id][ra_id]
+        self.job_clients = {} # store the client_id for each job [job_id]
+
+        self.master_info = {} # store the master info for each job [job_id]{ip, port, k3s_token}
+        self.job_offers = {} # job_offer stores the offer that fulfills a job request [job_id][]
+        self.lead_resource = {} # store the lead resource RA for each job [job_id]=ra_id
+        self.tosca = {} # store the Sardou tosca object for each job [job_id]
+    
         # Extract configuration values
         self.ra_id = self.config.get('RA_id')
         self.universe_id = self.config.get('universe_id')
@@ -114,6 +139,32 @@ class ResourceAgent:
             self.logger.error(f"Failed to initialize peer: {e}")
             raise
 
+    def _update_job_state(self, job_id, new_state):
+        # create entry if missing
+        if job_id not in self.job_states:
+            self.job_states[job_id]["state"] = "Pending"
+        # update state
+        self.job_states[job_id]["state"] = new_state
+
+    def _delete_job(self, job_id):
+        if job_id in self.job_states:
+            del self.job_states[job_id]
+
+        if job_id in self.job_responses:
+            del self.job_responses[job_id]
+
+        if job_id in self.master_info:
+            del self.master_info[job_id]
+
+        if job_id in self.job_clients:
+            del self.job_clients[job_id]
+
+        if job_id in self.job_offers:
+            del self.job_offers[job_id]
+
+        if job_id in self.lead_resource:
+            del self.lead_resource[job_id]
+
     def _register_message_handlers(self):
         """Register handlers for different message types"""
         self.peer.register_message_handler("MSG_SUBMIT", self._handle_submit)
@@ -121,11 +172,14 @@ class ResourceAgent:
         self.peer.register_message_handler("MSG_RESOURCE_QUERY", self._handle_resource_query)
         self.peer.register_message_handler("MSG_HEARTBEAT", self._handle_heartbeat)
         self.peer.register_message_handler("MSG_JOB_SUBMIT", self._handle_job_submit)
+        self.peer.register_message_handler("MSG_JOB_DELETE", self._handle_job_delete)
         self.peer.register_message_handler("MSG_JOB_BROADCAST", self._handle_job_broadcast)
         self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
         self.peer.register_message_handler("MSG_CREATE_RESOURCE", self._handle_create_resource)
+        self.peer.register_message_handler("MSG_CREATE_LEAD_RESOURCE", self._handle_create_lead_resource)
         self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info)
 
+    # Ze-TODO： this function may not be needed anymore
     def _handle_submit(self, peer_id: str, message: Dict[str, Any]):
         """Handle job submission requests"""
         self.logger.info(f"Received submit request from {peer_id}")
@@ -142,11 +196,11 @@ class ResourceAgent:
     def _handle_getstate(self, peer_id: str, message: Dict[str, Any]):
         """Handle state query requests"""
         self.logger.info(f"Received state query from {peer_id}")
-        app_id = message.get('appid', 'unknown')
+        job_id = message.get('job_id', 'unknown')
         response = {
-            "appid": app_id,
+            "job_id": job_id,
             "ra_id": self.ra_id,
-            "state": "running",
+            "state": self.job_states.get(job_id, {}).get("state", "unknown"),
             "resources_available": True,
             "queue_length": 0
         }
@@ -176,41 +230,74 @@ class ResourceAgent:
     def _handle_job_submit(self, peer_id: str, message: Dict[str, Any]):
         """Handle job submission from client - Hub RA only"""
         self.logger.info(f"Received application submission from {peer_id}")
-
         job_id = message.get('job_id')
-        ask_yaml = message.get('ask_yaml')
-        client_id = message.get('client_id')
-        all_ras = self.peer.find_peers({"peer_type": "RA"})
-        if not ask_yaml:
-            self.logger.error("No ask_yaml data in application submission")
-            return
+        self.job_states[job_id] = {}
+        self._update_job_state(job_id, "Pending")
+        self.job_clients[job_id] = message.get('client_id')
+        ask_yaml = message.get('tosca')
+        # initialise application tosca
+        self.job_tosca[job_id] = ask_yaml
 
-        # Hub RA processes and broadcasts job
-        if not self.bootstrap_peers:
-            self.logger.info(f"Broadcasting application {job_id} to all RAs")
-
-            # Find all other RAs in network
+        write_yaml(ask_yaml, 'tosca.yaml')
+	    # Ze-done: Using TOSCA library to validate and parse the tosca then extract resource requirements 
+        try:
+            # 1) (done) validate and parse
+            self.tosca[job_id] = Sardou('tosca.yaml') #(to validate, may fail if invalid)
+            print(f"✅ Successfully validated submitted application tosca for job {job_id}")
+            
+            # 2) (done) update state: if failed, 'failure';
+            # 3) (done) if successful, extract resource requirements from tosca object
+            ask_yaml = self.tosca[job_id].get_requirements()
+            self._update_job_state(job_id, "Initialising")
+            client_id = message.get('client_id')
             all_ras = self.peer.find_peers({"peer_type": "RA"})
-            other_ras = [ra for ra in all_ras if ra != self.ra_id]
+            if not ask_yaml:
+                self.logger.error("No ask_yaml data in application submission")
+                return
 
-            broadcast_message = {
-                "job_id": job_id,
-                "client_id": client_id,
-                "ask_yaml": ask_yaml,
-                "timestamp": message.get('timestamp'),
-                "hub_ra": self.peer.peer_id
-                #"hub_ra": self.ra_id
-            }
+            # Hub RA processes resource requirements and broadcasts to other RAs
+            if not self.bootstrap_peers:
+                self.logger.info(f"Broadcasting application {job_id} to all RAs")
 
-            # Broadcast to all other RAs
-            for ra_id in other_ras:
-                self.peer.send(ra_id, "MSG_JOB_BROADCAST", broadcast_message)
-                self.logger.info(f"Broadcasted application to {ra_id}")
+                # Find all other RAs in network
+                all_ras = self.peer.find_peers({"peer_type": "RA"})
+                other_ras = [ra for ra in all_ras if ra != self.ra_id]
 
-            # Process locally as well
-            self._process_job_requirements(job_id, client_id, ask_yaml, self.ra_id)
-        else:
-            self.logger.warning("Non-hub RA received direct job submission")
+                broadcast_message = {
+                    "job_id": job_id,
+                    "client_id": client_id,
+                    "ask_yaml": ask_yaml,
+                    "timestamp": message.get('timestamp'),
+                    "hub_ra": self.peer.peer_id
+                    #"hub_ra": self.ra_id
+                }
+
+                # Broadcast to all other RAs
+	            # Ze-TODO: modify this, to use broadcast method
+                for ra_id in other_ras:
+                    self.peer.send(ra_id, "MSG_JOB_BROADCAST", broadcast_message)
+                    self.logger.info(f"Broadcasted application to {ra_id}")
+
+                # Process locally as well
+                self._process_job_requirements(job_id, client_id, ask_yaml, self.peer.peer_id)            
+            else:
+                self.logger.warning("Non-hub RA received direct job submission")
+        except Exception as e:
+            print(f"❌ Failed to process tosca.yaml: {e}")
+            self._update_job_state(job_id, new_state="Invalid")
+            return None
+  
+
+    def _handle_job_delete(self, peer_id: str, message: Dict[str, Any]):
+        """Handle job deletion requests"""
+        self.logger.info(f"Received submit job deletion request from {peer_id} to delete job {message.get('job_id')}")
+        job_id = message.get('job_id')
+        CLUSTER_NAME = job_id
+        swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+        swarmchestrate.destroy(CLUSTER_NAME)
+        self._delete_job(job_id)
+        self.logger.info(f"Job {job_id} deleted successfully")
+
 
     def _handle_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Handle job broadcast from hub RA"""
@@ -226,7 +313,13 @@ class ResourceAgent:
         self._process_job_requirements(job_id, client_id, ask_yaml, hub_ra)
 
     def _process_job_requirements(self, job_id: str, client_id: str, ask_yaml: Dict, hub_ra: str):
-        """Process job requirements against RA capacity"""
+        """ 
+            Ze:
+            Process job requirements against RA capacity
+            Each RA receives a JOB_BROADCAST msg with job requirements from the Hub RA.
+            Each RA evaluates the requirements and sends a RESOURCE_RESPONSE msg back to the Hub RA with their resource offers.
+        """
+
         self.logger.info(f"RA: {self.ra_id} Evaluating application {job_id} requirements")
 
         if not self.capacity:
@@ -255,8 +348,10 @@ class ResourceAgent:
                 resource_responses[resource_name] = {
                     "answer": "yes",
                     "ra_id": self.ra_id,
-                    "provider": self.credentials.get('provider'),
-                    "resource_provider": self.capacity.get('metadata', {}).get('resource-provider'),
+                    "provider": self.capacity.get('metadata', {}).get('resource-provider'),
+                    # Ze—done：double check this redundant field
+                    # Ze：in resource response handler， we only used provider field so the redundant field is removed
+                    #"resource_provider": self.capacity.get('metadata', {}).get('resource-provider'),
                     "location": self._format_location(),
                     "bid": self._create_bid(resource_name, capabilities, count),
                     "resource_definition": self._create_resource_definition(resource_name, capabilities, count),
@@ -272,17 +367,29 @@ class ResourceAgent:
                     "reason": "Insufficient capacity or incompatible requirements"
                 }
 
+        # # Ze: we need this condition because the hub RA does not received RESOURCE_RESPONSE sent from itself
+        # # Ze：with the latest P2P lib changes, the hub RA also receives its own sent messages, so this block is commented out
+        # if self.ra_id == hub_ra:
+        #     self.logger.info(f"Hub RA {self.ra_id} does not send RESOURCE_RESPONSE to itself")
+        #     if job_id not in self.job_responses:
+        #         self.job_responses[job_id] = {}
+        #     self.job_responses[job_id][self.ra_id] = {
+        #         'provider': self.capacity.get('metadata', {}).get('resource-provider'),
+        #         'responses': resource_responses
+        #     }
+        #     return
+        
         # Send consolidated response to client
         response_message = {
             "job_id": job_id,
             "ra_id": self.ra_id,
-            "provider": self.credentials.get('provider'),
+            "provider": self.capacity.get('metadata', {}).get('resource-provider'),
             "timestamp": time.time(),
             "responses": resource_responses
         }
 
         all_ras = self.peer.find_peers({"peer_type": "RA"})
-
+        #print(f"Sending resource response to hub RA {hub_ra} from RA {self.ra_id}, total RAs in network: {len(all_ras)}")
         self.peer.send(hub_ra, "MSG_RESOURCE_RESPONSE", response_message)
 
     def _evaluate_requirement(self, capabilities: Dict, count: int) -> bool:
@@ -329,8 +436,6 @@ class ResourceAgent:
     def _create_bid(self, resource_name: str, capabilities: Dict, count: int) -> Dict:
         """Create bid information for resource"""
         suitable_instances = get_matching_instances(capabilities, self.capacity)
-        #print(f"capabilities are: {capabilities}")
-        #print(f"\n\n\ncapacity is: {self.capacity}")
         if not suitable_instances:
             return {}
 
@@ -438,6 +543,7 @@ class ResourceAgent:
                     "cost_per_hour": our_pricing.get(instance_type, 0)
                 }
 
+
         return matching
 
     def _format_location(self) -> str:
@@ -446,20 +552,25 @@ class ResourceAgent:
         city = locality.get('city', 'Unknown')
         country = locality.get('country', 'Unknown')
         return f"{city}, {country}"
-
+    
     def _handle_resource_response(self, peer_id, message):
-        """Process resource response from RA"""
+        """
+            Ze:
+            Process resource response from RA
+            The Hub RA receives RESOURCE_RESPONSE msgs from all RAs.
+            It compiles the responses, finds valid combinations, ranks them using AI algorithm, and selects one.
+            The lead resource (LR) is then created based on the selected offer.
+            Only LR is created here because it will create the k3s cluster and returns the master info to the hub RA so that other RAs can connect to it.
+        """
+
+        self.logger.info(f"Received resource response from RA: {peer_id}")
         job_id = message.get('job_id')
         ra_id = message.get('ra_id')
         provider = message.get('provider')
         responses = message.get('responses', {})
-
-        #print("11111111111111111111111111111111111111")
         len_res = len(responses)
-        #print(f"len is {len_res}")
-        #print("11111111111111111111111111111111111111")
-        #print(f"message is: {message}")
-
+        #print(f"len of job responses for job {job_id} is {len_res}")
+        
         if job_id not in self.job_responses:
             self.job_responses[job_id] = {}
 
@@ -470,50 +581,58 @@ class ResourceAgent:
 
         # Check if all RAs have responded
         all_ras = self.peer.find_peers({"peer_type": "RA"})
-        #if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
+        #here we need len(all_ras) + 1 because all_ras does not include the main ra, the main ra cannot be detected with the function self.peer.find_peers({"peer_type": "RA"}).
         if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
-            # Ze: at here, LRA compiles all possible offers based on responses.
+            print(f"All RAs have responded for job {job_id}. Compiling results...")
             self._compile_and_display_results(job_id)
+        else:
+            return
         # Amjad: appeared also if there are offers. temporary commenting
-        if job_id not in self.job_offers:
-        #    logging.error("No resources are available for application %s", job_id)
-            return None
-        
+        #test
         # ADDED: Check if job_offers[job_id] is None (no valid combinations)
-        if self.job_offers[job_id] is None:
-            logging.error("No valid resource combinations for application %s", job_id)
-            return None 
-        # Ze: randomly select a resource's RA node as LR
-        #print("22222222222222222")
-        #print(f"{self.job_offers[job_id]}")
-        #selected_resource = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-sztaki-cloud-hu'), None)
-        selected_resource = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
+        if job_id not in self.job_offers:
+            self.logger.exception(
+                    "No valid resource combinations for application %s",
+                    job_id,
+                )
+            client_id = self.job_clients.get(job_id)
+            if client_id:
+                print("Sending submit response failure message to client:", client_id)
+                submit_response_message = {
+                        "job_id": job_id,
+                        "ra_id": self.ra_id,
+                        "result": "failure",
+                        "message": "Failed to compile resource offers"
+                        }
+                self.peer.send(client_id, "MSG_SUBMIT_RESPONSE", submit_response_message)                
+                return None
 
-#        selected_keys = [k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us']
-        #print(selected_resource)
-        #LR_index = random.randint(0, len(self.job_offers[job_id]) - 1)+1
-        #selected_resource = f"resource{LR_index}"
-        # a list stores all {"web1","web2"} -> list_name[LR_index]  
-        LR_id = self.job_offers[job_id][selected_resource]["ra_id"]
-        provider = self.job_offers[job_id][selected_resource]["provider"]
-        instance_type = self.job_offers[job_id][selected_resource]["instance_type"]
+        print("Valid resource combinations found. Selecting lead resource...") 
+        # Ze-TODO: randomly select a resource's RA node as LR
+        # Ze-DONE: for demo purpose, we hardcode the lead resource to be 'ra-aws-cloud-us'
+        self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
+        LR_id = self.job_offers[job_id][self.lead_resource[job_id]]["ra_id"]
+        provider = self.job_offers[job_id][self.lead_resource[job_id]]["provider"]
+        instance_type = self.job_offers[job_id][self.lead_resource[job_id]]["instance_type"]
 
-        #print(f"LR_index is {LR_index}, LR_id is {LR_id}, selected_resource is {self.job_offers[job_id][selected_resource]}")
+        
         print("Press a key to continue:")
         key_to_continue = input()
-
-	# Ze-DONE: define msg and send it to the RA which will instantiate the LR.
-        msg_resource_request_ra = {
+        msg_lead_resource_request_ra = {
                 "job_id": job_id,
                 "hub_ra": self.peer.peer_id,
-                "lead_resource": True, 
+                "lead_resource": True,
+                "leader_resource_name": self.lead_resource[job_id],
                 "timestamp": message.get('timestamp'),
-                "instance": { "instance_type": instance_type ,"k3s_role": "master","node-name": "lead-worker"}
-                #"instance": { "cloud": provider ,"instance_type": instance_type ,"ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "","ami": "ami-00ca32bbc84273381"}
+                "instance": {"instance_type": instance_type, "cloud": provider, "k3s_role": "master", "node-name": self.lead_resource[job_id]},
+                "tosca": self.job_tosca[job_id],
+                "offer_info": self.job_offers[job_id]
+                #"instance": { "cloud": provider ,"instance_type": instance_type ,"ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "","ami": "ami-0f7b02bb6a0e14062"}
         }
         
-        self.peer.send(LR_id, "MSG_CREATE_RESOURCE", msg_resource_request_ra)
+        self.peer.send(LR_id, "MSG_CREATE_LEAD_RESOURCE", msg_lead_resource_request_ra)
         self.logger.info(f"Sent resource request to RA: {LR_id}")
+        print("lens of job offer is: ",len(self.job_offers[job_id])-1)
 
 
 
@@ -590,8 +709,11 @@ class ResourceAgent:
             print("-" * 60)
             
             # Randomly select one combination
-            selected_index = self._rank_resource_offers(valid_combinations)
+            # Ze：we will use AI algorithm to select the best combination instead of random selection
             #selected_index = random.randint(0, len(valid_combinations) - 1)
+            
+            # Using AI algorithm to select the best combination
+            selected_index = self._rank_resource_offers(valid_combinations, job_id)
             selected_combination = valid_combinations[selected_index]
             
             print(f"\nSELECTED OFFER (chosen by the ranking algorithm: #{selected_index + 1}):")
@@ -603,6 +725,7 @@ class ResourceAgent:
             total_price = 0
             for resource_name in sorted(selected_combination.keys()):
                 allocation = selected_combination[resource_name]
+                count = allocation['count']
                 ra_id = allocation['ra_id']
                 energy_consumption += allocation['energy-consumption']
                 total_bandwidth += allocation['bandwidth']
@@ -613,10 +736,10 @@ class ResourceAgent:
             print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}, total price is: {total_price}")
             print("=" * 60)
         else:
-            print("No valid combinations found!")
-            print("   No combination can fulfill all resource requirements.")
-
-# Save valid_combinations to a JSON file
+            print(f"No valid resource combinations found for job {job_id}!")
+            selected_combination = None
+            return
+        # Save valid_combinations to a JSON file
         with open("valid_combinations.json", "w") as f:
             json.dump(valid_combinations, f, indent=2)
         # Complete job processing
@@ -626,17 +749,19 @@ class ResourceAgent:
             self.job_offers[job_id] = {}
 
         self.job_offers[job_id] = selected_combination
-        print(f"job_offer for job {job_id} is {self.job_offers[job_id]}, size is {len(self.job_offers[job_id])}")
+        print(f"job_offer for job {job_id} is {self.job_offers[job_id]}")
         #self.peer.leave().addCallback(lambda _: self.peer.stop())
 
-    def _rank_resource_offers(self,valid_combinations):
-        """Rank resource offers based on QoS attributes"""
-        qos_priority = {
-            "energy": 0.5,
-            "bandwidth": 0.5,
-            "latency": 0.5,
-            "price": 0.5
-        }
+    def _rank_resource_offers(self,valid_combinations, job_id):
+        """Rank resource offers based on QoS attributes using AI algorithm"""
+        # Ze-done: Using the TOSCA library to fetch QoS priorities and populate them into the qos_priority template.
+        # 1) create a qos_priority template
+        # 2) get the qos_priority from the TOSCA 
+        # 3) populate the qos_priority template
+
+        qos_data = self.tosca[job_id].get_qos()
+        qos_priority = get_qos_priorities(qos_data)
+        print(f"qos_priority extracted from TOSCA is {qos_priority}")
         reliability_list = []
         latency_list = []
         energy_list = []
@@ -722,34 +847,81 @@ class ResourceAgent:
         return valid_combinations
 
 
-    def _handle_create_resource(self, peer_id, message):
-        """Process create resource request from LRA"""
-        self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
+    def _handle_create_lead_resource(self, peer_id, message):
+        """
+            Ze:
+            The RA which receives this msg will create the lead resource (LR) VM, k3s cluster, and return the master info to the hub RA.
+        """
+        self.logger.info(f"RA {self.ra_id} receives create lead resource request from {peer_id}")
         job_id = message.get('job_id')
 
         LR = message.get('lead_resource')
+        lead_resource_name = message.get('leader_resource_name')
         instance = message.get('instance', {})
         instance_type = instance["instance_type"]
-        #node_name = instance["node_name"]
-
+        k3s_role = instance["k3s_role"]
+        node_name = instance["node-name"]
+        tosca = message.get('tosca', {})
+        cloud = instance["cloud"]
+        #cloud = "openstack"
+        #instance_type = "m2.small"
         print(f"instance is {instance}")
-	# Ze-TODO: finish the RA which receives the msg and to create a VM
-        if(LR):
-	    # Ze: if it is the lead resource, it creates the LR VM, k3s cluster, deploy LSA, send the cluster info to the main RA.
-            # Ze-TODO; make sure them can be corrected loaded on all clouds (sztaki, edge, aws_us)
+        offer_info = message.get('offer_info', {})
+        print(f"offer_info received by LR is {offer_info}")
 
-            # Cluster-builder LSA Step 1
-            master_node = (
-                f'{{"cloud": "aws",'
+        # Ze-done: finish the RA which receives the msg and to create a VM
+        if(LR):
+	    # Ze: if it is the lead resource,
+            # 1. creates the LR VM
+            # 2. k3s cluster
+            # Ze-done; make sure them can be correctly loaded on all clouds (sztaki, edge, aws_us)
+
+            # For future automation, we need to make sure each RA has the required ssh key pair, security group, ami, etc for each provider.
+            master_node_aws = (
+                f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
                 f'"instance_type": "{instance_type}",'
-                f'"ssh_key_name": "",'
-                f'"resource_name":"lead-worker",'
-#               f'"ssh_user": "ec2-user",'
-                f'"k3s_role": "master",'
-                f'"ssh_private_key_path": "",'
-                f'"security_group_id": "sg-091151edd2cd8cdf8",'
-                f'"ami": "ami-00ca32bbc84273381"}}'
+                f'"ha": false,'
+                f'"cluster_name": "{job_id}",'
+                f'"ami": "",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
+                f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
+                f'"resource_name":"{node_name}",' # Ze: to think about how to name
+                f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
+            #    f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
+                f'"ssh_key": "",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
+                f'"k3s_role": "{k3s_role}"}}' # Ze: this should be default 
             )
+
+            master_node_openstack = (
+                f'{{"cloud": "{cloud}",'
+                f'"openstack_flavor_id": "{instance_type}",'
+                f'"ha": false,'
+                f'"openstack_image_id": "",'
+                f'"security_group_id": "",'
+                f'"volume_size": "10",'
+                f'"floating_ip_pool": "ext-net",'
+                f'"network_id": "",'
+                f'"resource_name":"{node_name}",'    
+                f'"ssh_user": "ubuntu",'
+                f'"ssh_key_name": "",'
+                f'"ssh_private_key_path": "",'
+                f'"use_block_device": true,'
+                f'"k3s_role": "{k3s_role}"}}'
+            )
+            master_node_edge = (
+                f'{{"cloud": "{cloud}",'
+                f'"edge_device_ip": "",'
+                f'"ha": false,'
+                f'"resource_name":"{node_name}",'
+                f'"ssh_user": "ubuntu",'
+                f'"ssh_private_key": "",'
+                f'"ssh_auth_method": "key",'
+                f'"k3s_role": "{k3s_role}"}}'
+            )
+            master_node = {
+                "aws": master_node_aws,
+                "openstack": master_node_openstack,
+                "edge": master_node_edge
+            }[cloud]
             master_node = json.loads(master_node)
 
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
@@ -758,15 +930,57 @@ class ResourceAgent:
             k3s_token = outputs.get("k3s_token")
             cluster_name = outputs.get("cluster_name")
             master_ip = outputs.get("master_ip")
-        #    node_name = outputs.get("node_name")
-            # Ze-TODO 1) : deploy LSA, based on master_node, LSA should be able to load config files.
-            # Ze-TODO 1a): prepare manifests:
-	    # 1. ip address of the hub_ra
-            # 2. node name of each resource
-            # 3. image of application 
-	    # application's tosca into SA's expected toscas and store them in config-map.
 
-# Cluster configuration for testing
+            # After creating the lead resource;
+            # substract the count of the resource requirement for lead resource by one because it will be created
+
+            
+            # Ze-done: Prepare configmap of tosca file for SA
+            # Ze: we have three folders to create here: KB/, k3s/, k3s-{job_id}/
+            #     1) KB/ acts as knowledge base and stores the tosca file
+            #     2) k3s/ stores default manifests for deploying SA and other, i.e., namespace, daemonset, rbac, k3s-dashboard
+            #     3) k3s-{job_id}/ stores all manifests for deploying SA for this job, it copies from k3s/ and adds two configmaps: tosca configmap and SA configmap  
+            #        a) tosca configmap: contains the tosca file for this job
+            #        b) SA configmap: contains the SA configuration info
+
+            folder_path = f"KB"
+            #import os
+            #import shutil
+
+            _os.makedirs(folder_path, exist_ok=True)  # ✅ Creates folder if it doesn't exist
+            write_yaml(tosca, f"KB/{job_id}_tosca.yaml")
+            folder_path = f"k3s-{job_id}"
+            _os.makedirs(folder_path, exist_ok=True)  # ✅ Creates folder if it doesn't exist
+            src_folder = "k3s"
+
+            # ✅ Copy all files from k3s/ into k3s-{job_id}/
+            if _os.path.exists(src_folder):
+                for item in _os.listdir(src_folder):
+                    src_path = _os.path.join(src_folder, item)
+                    dest_path = _os.path.join(folder_path, item)
+                    if _os.path.isdir(src_path):
+                        _shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
+                    else:
+                        _shutil.copy2(src_path, dest_path)
+            else:
+                print(f"⚠️ Warning: Source folder '{src_folder}' does not exist.")
+            
+            # prepare configmap of tosca file for SA
+            configMap_tosca_path = f"k3s-{job_id}/03-configmap-swarm-agent-tosca.yaml"
+            write_tosca_configmap(f"KB/{job_id}_tosca.yaml", output_file=configMap_tosca_path)
+            
+            # Ze-done: Prepare configmap of SA configuration
+            # input: job_id, resource names
+            # Ze-done: input should include hub RA's ip. without it, SA cannot join in p2p network.
+            resource_input = {
+                "LEADER": lead_resource_name,
+                "Worker": [res for res in offer_info if res != lead_resource_name]                                
+            }
+            configMap_config_path = f"k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
+            # The ra_ip should be the ip of one of the RAs, don't be confused with master_ip which is the LR ip.
+            write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip="18.175.154.47")
+            
+            # Ze-done: Create registry secret on the LR using cluster-builder library
             registry_config = {
                 "master_ip": master_ip,
                 "ssh_user": "ec2-user",
@@ -775,141 +989,144 @@ class ResourceAgent:
                 #"namespace":"test" , #optional
             }
  
-# Run the registry secret creation
+            # Run the registry secret creation
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             swarmchestrate.create_registry_secrets(registry_config)
 
-
-            ### Cluster-builder LSA Step 2 Manifest
-
-            # Preprocess cluster-builder copy-manifest
+            # copy the manifests from k3s-{job_id}/ to the LR
             manifest_cfg = (
-                f'{{"manifest_folder": "/home/ubuntu/swarm-agent/k3s",'
+                f'{{"manifest_folder": "/home/ubuntu/e2e-demo/k3s-{job_id}",'
                 f'"master_ip": "{master_ip}",'
                 f'"ssh_key_path": "",'
                 f'"ssh_user": "ec2-user"}}'
             )
-            # Load configuration
             cfg = json.loads(manifest_cfg)
-
             manifest_folder = Path(cfg["manifest_folder"])
             manifest_folder.exists() or exit(f"❌ Manifest folder does not exist: {manifest_folder}")
-
-            # Run cluster-builder copy-manifest: this copy paste manifests of system components, e.g., SA, k3s-dashboard to the LR.
+            # Run cluster-builder copy-manifest
             Swarmchestrate(template_dir="templates", output_dir="output").deploy_manifests(
             manifest_folder=str(manifest_folder),
             master_ip=cfg["master_ip"],
             ssh_key_path=cfg["ssh_key_path"],
             ssh_user=cfg["ssh_user"]
-            )
+            ) 
 
-
-
-            ### Cluster-builder LSA Step 3 send back info
-            # Ze-(DONE) 2) ) : prepare master_output and send back to ra_hub.
+            # Ze: send k3s master info back to the hub RA, so that other RAs can create worker nodes and join the cluster
             msg_master_info = {
                 "job_id": job_id,
                 "hub_ra": self.peer.peer_id,
-                "lead_resource": True, 
                 "timestamp": message.get('timestamp'),
                 "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip}
             }
-        
-            self.peer.send(peer_id, "MSG_MASTER_INFO", msg_master_info)
-
-            print(f"Output from master node is: {outputs}")
+            self.peer.send(message.get('hub_ra'), "MSG_MASTER_INFO", msg_master_info)
             self.logger.info(f"RA {self.ra_id} instantiates the lead resource")
-        else:
-            self.logger.info(f"RA {self.ra_id} instantiates normal resource")
-	    # Ze: it is not lead resource, create a VM, join the cluster
-            master_node = f'{ "cloud": {provider}","instance_type": {instance['instance_type']},"ssh_key_name": "","ssh_user": {ssh_user},"k3s_role": "master","ssh_private_key_path": {ssh_private_key_path},"ami": {ami}}'
-
-
-    def _handle_resource_request(self, peer_id, message):
-        """Process resource request from SA"""
-        self.logger.info(f"RA {self.ra_id} receives resource request from {peer_id}")
-
-	# Ze-TODO 3) : SA should just send resource 1/2/3.... 
-	# LRA should identify the provider, the instance, and so on so forth
-        print(f"Message is \n {message}")
-        resource_index = message.get('resource_index')
-        sa_requested_resource = f"resource{resource_index}"
-
-        ra_id = self.job_offers[job_id][sa_requested_resource]["ra_id"]
-        provider = self.job_offers[job_id][sa_requested_resource]["provider"]
-        instance_type = self.job_offers[job_id][sa_requested_resource]["instance_type"]
-
-	# Ze-TODO: define msg send to a RA such that it can use it to create a VM.
-        msg_resource_request_ra = {
-                "job_id": job_id,
-                "hub_ra": self.peer.peer_id,
-                "lead_resource": True, 
-                "timestamp": message.get('timestamp'),
-                "instance": { "cloud": provider ,"instance_type": instance_type ,"k3s_role": "worker"}
-        }
- 
-        self.peer.send(ra_id, "MSG_CREATE_RESOURCE", msg_resource_request_ra)
-        self.logger.info(f"Sent resource request to RA: {LR_id}")
-
 
     def _handle_master_info(self, peer_id, message):
-        """Process master info output from LR"""
+        """Process master info from lead resource"""
+        self.logger.info(f"RA {self.ra_id} receives master info from {peer_id}")
+        job_id = message.get('job_id')
+        master_info = message.get('master_info', {})
+        k3s_token = master_info["k3s_token"]
+        cluster_name = master_info["cluster_name"]
+        master_ip = master_info["master_ip"]
+        self.job_offers[job_id][self.lead_resource[job_id]]["count"] -= 1
+        offer_info = self.job_offers[job_id]
+        #print(f"Master info received by main RA is: {master_info}")
+        for res in offer_info:
+            if offer_info[res]["count"] <=0:
+                continue
+            ra_id = offer_info[res]["ra_id"]
+            print(f"ra_id in offer_info is {ra_id}")
+            msg_create_resource = {
+                    "job_id": job_id,
+                    "hub_ra": self.peer.peer_id, 
+                    "lead_resource": False, 
+                    "timestamp": message.get('timestamp'),
+                    "instance": { "resource": offer_info[res], "k3s_role": "worker", "node-name": list(offer_info.keys())[list(offer_info.values()).index(offer_info[res])]},
+                    "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip}
+                }
+            self.peer.send(ra_id, "MSG_CREATE_RESOURCE", msg_create_resource)
+        self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
 
-        self.logger.info(f"RA {self.ra_id} receives master info output from LR: {peer_id}")
-        self.master_info = message.get('master_info')
-
+    def _handle_create_resource(self, peer_id, message):
+        """Process create resource request from LRA"""
+        self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
+        job_id = message.get('job_id')
+        instance = message.get('instance', {})
+        instance_type = instance["resource"]["instance_type"]
+        k3s_role = instance["k3s_role"]
+        resource_name = instance["node-name"]
+        self.master_info = message.get('master_info') # Ze-TODO: master info should be job_id specific
         cluster_name = self.master_info["cluster_name"]
         master_ip = self.master_info["master_ip"]
         k3s_token = self.master_info["k3s_token"]
+        for i in range(instance["resource"]["count"]):
+            cloud = instance["resource"]["provider"]
+            if instance["resource"]["count"] >1:
+                node_name = f"{resource_name}-{i+1}"
+            else:
+                node_name = resource_name
+            worker_node_aws = (
+                    f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
+                    f'"instance_type": "{instance_type}",'
+                    f'"ha": false,'
+                    f'"ami": "",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
+                    f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
+                    f'"resource_name":"{node_name}",' # Ze: to think about how to name
+                    f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
+                 #   f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
+                    f'"ssh_key": "",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
+                    f'"k3s_role": "{k3s_role}",' # Ze: this should be default 
+                    f'"k3s_token": "{k3s_token}",'
+                    f'"master_ip": "{master_ip}",'
+                    f'"cluster_name": "{cluster_name}"}}'
+                )
 
-        #Ze-TODO: this is just a try out to add the edge node as a worker
-        worker_node_aws = (
-                f'{{"cloud": "edge","edge_device_ip": "", "resource_name":"worker-node-1",'
-                f'"ssh_user": "ubuntu","k3s_role": "worker","ssh_private_key": "",'
-                f'"ssh_auth_method": "key",'
-                f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
-        )
+            worker_node_openstack = (
+                    f'{{"cloud": "{cloud}",'
+                    f'"openstack_flavor_id": "{instance_type}",'
+                    f'"ha": false,'
+                    f'"openstack_image_id": "",'
+                    f'"security_group_id": "",'
+                    f'"volume_size": "10",'
+                    f'"floating_ip_pool": "ext-net",'
+                    f'"network_id": "",'
+                    f'"resource_name":"{node_name}",'    
+                    f'"ssh_user": "ubuntu",'
+                    f'"ssh_key_name": "",'
+                    f'"ssh_private_key_path": "",'
+                    f'"use_block_device": true,'
+                    f'"k3s_role": "worker",'
+                    f'"k3s_token": "{k3s_token}",'
+                    f'"master_ip": "{master_ip}",'
+                    f'"cluster_name": "{cluster_name}"}}' 
+                )
 
-        worker_node_sztaki = (
-                f'{{"cloud": "openstack","openstack_image_id": "",'
-                f'"openstack_flavor_id": "m2.small",'
-                f'"ssh_key_name": "",'
-                f'"volume_size": "10",'
-                f'"k3s_role": "worker",'
-                f'"ha": false,'
-                f'"ssh_user": "ubuntu",'
-                f'"ssh_private_key_path": "",'
-                f'"floating_ip_pool": "ext-net",'
-                f'"network_id": "",'
-                f'"use_block_device": true,'
-                f'"resource_name":"worker-node-1",'
-                f'"security_group_id": "",'
-                f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
-        )
-        worker_node_edge = (
-                f'{{"cloud": "edge","edge_device_ip": "", "resource_name":"worker-node-1",'
-                f'"ssh_user": "ubuntu","k3s_role": "worker","ssh_private_key": "",'
-                f'"ssh_auth_method": "key",'
-                f'"k3s_token": "{k3s_token}", "master_ip": "{master_ip}", "cluster_name": "{cluster_name}"}}'
-        )
-        worker_node = json.loads(worker_node_edge)
-        swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-        outputs = swarmchestrate.add_node(worker_node)
+            worker_node_edge = (
+                    f'{{"cloud": "{cloud}",'
+                    f'"edge_device_ip": "",'
+                    f'"ha": false,'
+                    f'"resource_name":"{node_name}",'
+                    f'"ssh_user": "ubuntu",'
+                    f'"ssh_private_key": "",'
+                    f'"ssh_auth_method": "key",'
+                    f'"k3s_role": "worker",'
+                    f'"k3s_token": "{k3s_token}",'
+                    f'"master_ip": "{master_ip}",'
+                    f'"cluster_name": "{cluster_name}"}}'   
+                )
+            worker_node = {
+                    "aws": worker_node_aws,
+                    "openstack": worker_node_openstack,
+                    "edge": worker_node_edge
+                }[cloud]
+            worker_node = json.loads(worker_node)
+            swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+            swarmchestrate.add_node(worker_node)
+        
 
-# Cluster configuration for testing
-#        registry_config = {
-#            "master_ip": master_ip,
-#            "ssh_user": "ubuntu",
-#            "ssh_private_key_path": "",
-#            "secret_names": [""], #optional
-#            "namespace":"test" , #optional
-#        }
- 
-# Run the registry secret creation
-#        swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-#        swarmchestrate.create_registry_secrets(registry_config)
-#        print(f"worker_node {worker_node}")
-
+	# Ze-done: finish the RA which receives the msg and to create a VM
+        self.logger.info(f"RA {self.ra_id} instantiates resource {resource_name} for job {job_id}")
 
     def connect_to_network(self):
         """Connect to P2P network using bootstrap peers"""
@@ -963,3 +1180,6 @@ class ResourceAgent:
             "provider": self.credentials.get('provider'),
             "capacity_loaded": bool(self.capacity)
         }
+
+
+
