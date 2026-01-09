@@ -32,7 +32,7 @@ python src/ra.py [arg1] [arg2]
 
   The templates of these config files are available in the config/ directory, arg1 template is ra-config.yaml and arg2 template is capacity-config.yaml.
 
-### Resource selection jobs
+### Client
 Run the Job submission client script to submit a request to select resources for a given application:
 
 ```bash
@@ -40,3 +40,15 @@ python job_submission_client.py [arg1]
 ```
 ### Arguments
 - `arg1` (Mandatory): Path to the YAML-based file. An example template can be found in client/template.yaml.
+
+### Cluster-builder
+The cluster-builder library requires environment varibles that stores cloud credentials and container registry credentials. 
+A template can be found in cluster-builder-env/env
+Note that, in the real deployment, env file should be stored in the e2e-demo folder as .env. 
+To load it, one should run the following commands in the e2e-demo folder:
+
+```bash
+set -a
+. .env
+set +a 
+```
