@@ -1,0 +1,27 @@
+## PG Configuration
+POSTGRES_USER=
+POSTGRES_PASSWORD=
+POSTGRES_HOST= #ip
+POSTGRES_DATABASE=
+POSTGRES_SSLMODE=disable
+
+## AWS Auth
+TF_VAR_aws_region=
+TF_VAR_aws_access_key=
+TF_VAR_aws_secret_key=
+
+## Openstack Auth
+TF_VAR_openstack_auth_method=
+TF_VAR_openstack_auth_url=
+TF_VAR_openstack_region=
+TF_VAR_openstack_application_credential_id=
+TF_VAR_openstack_application_credential_secret=
+
+# tofu logs
+TF_LOG=INFO
+TF_LOG_PATH=/tmp/swarmchestrate-tf.log
+
+# Registry credentials (comma-separated)
+DOCKER_REGISTRIES=
+DOCKER_USERNAMES=
+DOCKER_PASSWORDS=
