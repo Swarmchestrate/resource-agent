@@ -1,0 +1,7 @@
+request_type: ""   # submit | delete | query
+job_id: ""         # required for delete or query
+tosca_path: ""   # path of the application's tosca required only for submit request
+hub_host: "" # ip of the main ra
+hub_port: 5000 # port of the main ra, 5000 by default
+gw_RA_id: "" # id of the main ra
+
