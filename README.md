@@ -42,9 +42,9 @@ python job_submission_client.py [arg1]
 - `arg1` (Mandatory): Path to the YAML-based file. An example template can be found in client/template.yaml.
 
 ### Cluster-builder
-The cluster-builder library requires environment varibles that stores cloud credentials and container registry credentials. 
+The cluster-builder library requires environment varibles that store cloud credentials and container registry credentials. 
 A template can be found in cluster-builder-env/env
-Note that, in the real deployment, env file should be stored in the e2e-demo folder as .env. 
+Note that, in the real deployment, the env file should be stored in the e2e-demo folder as e2e-demo/.env. 
 To load it, one should run the following commands in the e2e-demo folder:
 
 ```bash
