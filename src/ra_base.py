@@ -70,6 +70,7 @@ class ResourceAgent:
         self.domain = self.config.get('domain', '0.0.0.0')
         self.bootstrap_peers = self.config.get('bootstrap_peers', [])
         self.credentials = self.config.get('credentials', {})
+        self.hub_ra_ip = self.config.get('hub_ra_ip', '')
 
         # Extract cluster-builder required values
         # Ze-TODO: these values may not be needed anymore, tosca.get_cluster() function should return these values, but it is not implemented yet
@@ -990,7 +991,7 @@ class ResourceAgent:
             configMap_config_path = f"k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
             # The ra_ip should be the ip of one of the RAs, don't be confused with master_ip which is the LR ip.
             # Ze-TODO: we need to make sure the hub RA ip is reachable by all RAs.
-            write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.peer.get_peer_info(self.peer.peer_id).get('ip_address')+"")
+            write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.hub_ra_ip+"")
             
             # Ze-done: Create registry secret on the LR using cluster-builder library
             registry_config = {
