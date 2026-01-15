@@ -19,7 +19,7 @@ swchp2pcom==0.4.1
 # Async support
 asyncio-mqtt==0.16.1
 # cluster-builder Library
-cluster-builder==0.4.1
+cluster-builder==0.4.2
 
 # Logging and monitoring
 python-json-logger==2.0.7
