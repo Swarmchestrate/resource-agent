@@ -77,7 +77,7 @@ class ResourceAgent:
         self.ssh_key_path = self.config.get('ssh_key_path', '')
         self.aws_ami = self.config.get('aws_ami', '')
         self.openstack_image_id = self.config.get('openstack_image_id', '')
-        self.oepnstack_network_id = self.config.get('openstack_network_id', '')
+        self.openstack_network_id = self.config.get('openstack_network_id', '')
         self.edge_device_ip = self.config.get('edge_device_ip', '')
 
         # Initialize P2P communication
