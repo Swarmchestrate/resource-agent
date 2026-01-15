@@ -998,8 +998,8 @@ class ResourceAgent:
             # Ze-done: Create registry secret on the LR using cluster-builder library
             registry_config = {
                 "master_ip": master_ip,
-                "ssh_user": "ec2-user",
-                "ssh_private_key_path": "{self.ssh_key_path}",
+                "ssh_user": "ec2-user", #Ze-TODO: ubuntu for openstack
+                "ssh_private_key_path": self.ssh_key_path,
                 "secret_names": ["regcred"] #optional
                 #"namespace":"test" , #optional
             }
