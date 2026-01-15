@@ -943,6 +943,8 @@ class ResourceAgent:
             cluster_name = outputs.get("cluster_name")
             master_ip = outputs.get("master_ip")
 
+
+            print(f"[DEBUG] master ip is {master_ip}")
             # After creating the lead resource;
             # substract the count of the resource requirement for lead resource by one because it will be created
 
@@ -997,7 +999,7 @@ class ResourceAgent:
             registry_config = {
                 "master_ip": master_ip,
                 "ssh_user": "ec2-user",
-                "ssh_private_key_path": "",
+                "ssh_private_key_path": "{self.ssh_key_path}",
                 "secret_names": ["regcred"] #optional
                 #"namespace":"test" , #optional
             }
@@ -1008,9 +1010,11 @@ class ResourceAgent:
 
             # copy the manifests from k3s-{job_id}/ to the LR
             manifest_cfg = (
-                f'{{"manifest_folder": "/home/ubuntu/e2e-demo/k3s-{job_id}",'
+                f'{{"manifest_folder": "/home/ubuntu/e2e-demo/ra/k3s-{job_id}",'
+#                f'{{"manifest_folder": "/home/ubuntu/e2e-demo/k3s-{job_id}",'
+
                 f'"master_ip": "{master_ip}",'
-                f'"ssh_key_path": "",'
+                f'"ssh_key_path": "{self.ssh_key_path}",'
                 f'"ssh_user": "ec2-user"}}'
             )
             cfg = json.loads(manifest_cfg)
