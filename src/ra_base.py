@@ -71,6 +71,15 @@ class ResourceAgent:
         self.bootstrap_peers = self.config.get('bootstrap_peers', [])
         self.credentials = self.config.get('credentials', {})
 
+        # Extract cluster-builder required values
+        # Ze-TODO: these values may not be needed anymore, tosca.get_cluster() function should return these values, but it is not implemented yet
+        # Ze-TODO: Maybe these should be defined in the capacity file instead of config file
+        self.ssh_key_path = self.config.get('ssh_key_path', '')
+        self.aws_ami = self.config.get('aws_ami', '')
+        self.openstack_image_id = self.config.get('openstack_image_id', '')
+        self.oepnstack_network_id = self.config.get('openstack_network_id', '')
+        self.edge_device_ip = self.config.get('edge_device_ip', '')
+
         # Initialize P2P communication
         self.peer = None
         self.is_running = False
@@ -882,12 +891,12 @@ class ResourceAgent:
                 f'"instance_type": "{instance_type}",'
                 f'"ha": false,'
                 f'"cluster_name": "{job_id}",'
-                f'"ami": "",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
+                f'"ami": "{self.aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
                 f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
                 f'"resource_name":"{node_name}",' # Ze: to think about how to name
                 f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
             #    f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
-                f'"ssh_key": "",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
+                f'"ssh_key": "{self.ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
                 f'"k3s_role": "{k3s_role}"}}' # Ze: this should be default 
             )
 
@@ -895,27 +904,27 @@ class ResourceAgent:
                 f'{{"cloud": "{cloud}",'
                 f'"openstack_flavor_id": "{instance_type}",'
                 f'"ha": false,'
-                f'"openstack_image_id": "",'
+                f'"openstack_image_id": "{self.openstack_image_id}",'
                 f'"security_group_id": "",'
                 f'"volume_size": "10",'
                 f'"floating_ip_pool": "ext-net",'
-                f'"network_id": "",'
+                f'"network_id": "{self.openstack_network_id}",'
                 f'"cluster_name": "{job_id}",'
                 f'"resource_name":"{node_name}",'    
                 f'"ssh_user": "ubuntu",'
                 f'"ssh_key_name": "",'
-                f'"ssh_private_key_path": "",'
+                f'"ssh_private_key_path": "{self.ssh_key_path}",'
                 f'"use_block_device": true,'
                 f'"k3s_role": "{k3s_role}"}}'
             )
             master_node_edge = (
                 f'{{"cloud": "{cloud}",'
-                f'"edge_device_ip": "",'
+                f'"edge_device_ip": "{self.edge_device_ip}",'
                 f'"ha": false,'
                 f'"cluster_name": "{job_id}",'
                 f'"resource_name":"{node_name}",'
                 f'"ssh_user": "ubuntu",'
-                f'"ssh_private_key": "",'
+                f'"ssh_key": "{self.ssh_key_path}",'
                 f'"ssh_auth_method": "key",'
                 f'"k3s_role": "{k3s_role}"}}'
             )
@@ -980,7 +989,8 @@ class ResourceAgent:
             }
             configMap_config_path = f"k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
             # The ra_ip should be the ip of one of the RAs, don't be confused with master_ip which is the LR ip.
-            write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip="18.175.154.47")
+            # Ze-TODO: we need to make sure the hub RA ip is reachable by all RAs.
+            write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.peer.get_peer_info(self.peer.peer_id).get('ip_address')+"")
             
             # Ze-done: Create registry secret on the LR using cluster-builder library
             registry_config = {
@@ -1072,12 +1082,12 @@ class ResourceAgent:
                     f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
                     f'"instance_type": "{instance_type}",'
                     f'"ha": false,'
-                    f'"ami": "",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
+                    f'"ami": "{self.aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
                     f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
                     f'"resource_name":"{node_name}",' # Ze: to think about how to name
                     f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
                  #   f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
-                    f'"ssh_key": "",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
+                    f'"ssh_key": "{self.ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
                     f'"k3s_role": "{k3s_role}",' # Ze: this should be default 
                     f'"k3s_token": "{k3s_token}",'
                     f'"master_ip": "{master_ip}",'
@@ -1088,15 +1098,15 @@ class ResourceAgent:
                     f'{{"cloud": "{cloud}",'
                     f'"openstack_flavor_id": "{instance_type}",'
                     f'"ha": false,'
-                    f'"openstack_image_id": "",'
-                    f'"security_group_id": "",'
+                    f'"openstack_image_id": "{self.openstack_image_id}",'
+                    #f'"security_group_id": "",'
                     f'"volume_size": "10",'
-                    f'"floating_ip_pool": "ext-net",'
-                    f'"network_id": "",'
+                    #f'"floating_ip_pool": "ext-net",'
+                    f'"network_id": "{self.openstack_network_id}",'
                     f'"resource_name":"{node_name}",'    
                     f'"ssh_user": "ubuntu",'
-                    f'"ssh_key_name": "",'
-                    f'"ssh_private_key_path": "",'
+                    #f'"ssh_key_name": "",'
+                    f'"ssh_key": "{self.ssh_key_path}",'
                     f'"use_block_device": true,'
                     f'"k3s_role": "worker",'
                     f'"k3s_token": "{k3s_token}",'
@@ -1106,11 +1116,11 @@ class ResourceAgent:
 
             worker_node_edge = (
                     f'{{"cloud": "{cloud}",'
-                    f'"edge_device_ip": "",'
+                    f'"edge_device_ip": "{self.edge_device_ip}",'
                     f'"ha": false,'
                     f'"resource_name":"{node_name}",'
                     f'"ssh_user": "ubuntu",'
-                    f'"ssh_private_key": "",'
+                    f'"ssh_key": "{self.ssh_key_path}",'
                     f'"ssh_auth_method": "key",'
                     f'"k3s_role": "worker",'
                     f'"k3s_token": "{k3s_token}",'
