@@ -216,6 +216,7 @@ class ResourceAgent:
             "queue_length": 0
         }
         self.peer.send(peer_id, "MSG_STATE_INFO", response)
+        self.logger.info(f"Sent job status for {job_id} to {peer_id}")
 
     def _handle_resource_query(self, peer_id: str, message: Dict[str, Any]):
         """Handle resource availability queries"""
