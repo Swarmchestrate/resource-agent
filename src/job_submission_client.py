@@ -3,6 +3,7 @@
 Swarmchestrate Client
 Submits resource requests to RA network and compiles responses
 """
+from email import message
 from typing import Any
 import yaml
 import time
@@ -107,6 +108,18 @@ class SwarmchestrateClient:
         )
 
         self.peer.register_message_handler("MSG_STATE_INFO", self._handle_query_response)
+
+        def _handle_query_response(self, peer_id: str, message: dict[str, Any]):
+            """Handle job status query responses from RA"""
+            self.logger.info(f"Received job status response from {peer_id}")
+            job_id = message.get('job_id')
+            status = message.get('state')
+            if status == "unknown":
+                self.logger.error(f"Job {job_id} not found")
+            else:
+                self.logger.info(f"Job {job_id} status: {status}")
+        # Process the message as needed
+        # For example, update job status in internal records
         def on_entered():
             print(f"Connected to hub {hub_host}:{hub_port}")
 
@@ -250,17 +263,7 @@ class SwarmchestrateClient:
         # Process the message as needed
         # For example, store job status or resource allocation details
 
-    def _handle_query_response(self, peer_id: str, message: dict[str, Any]):
-        """Handle job status query responses from RA"""
-        self.logger.info(f"Received job status response from {peer_id}")
-        job_id = message.get('job_id')
-        status = message.get('state')
-        if status == "unknown":
-            self.logger.error(f"Job {job_id} not found")
-        else:
-            self.logger.info(f"Job {job_id} status: {status}")
-        # Process the message as needed
-        # For example, update job status in internal records
+
 
 def main():
     if len(sys.argv) < 2:
