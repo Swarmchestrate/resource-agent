@@ -106,6 +106,7 @@ class SwarmchestrateClient:
             metadata={"peer_type": "JOB_CLIENT", "client_id": self.client_id}
         )
 
+        self.peer.register_message_handler("MSG_STATE_INFO", self._handle_query_response)
         def on_entered():
             print(f"Connected to hub {hub_host}:{hub_port}")
 
@@ -202,7 +203,6 @@ class SwarmchestrateClient:
  
         # Register response handler
         self.peer.register_message_handler("MSG_SUBMIT_RESPONSE", self._handle_submit_response)
-        self.peer.register_message_handler("MSG_STATE_INFO", self._handle_query_response)
         def on_entered():
             print(f"Connected to hub {hub_host}:{hub_port}")
 
