@@ -178,7 +178,8 @@ class ResourceAgent:
     def _register_message_handlers(self):
         """Register handlers for different message types"""
         self.peer.register_message_handler("MSG_SUBMIT", self._handle_submit)
-        self.peer.register_message_handler("MSG_GETSTATE", self._handle_getstate)
+        self.peer.register_message_handler("MSG_JOB_STATUS_QUERY", self._handle_job_status_query)
+    #    self.peer.register_message_handler("MSG_GETSTATE", self._handle_getstate)
         self.peer.register_message_handler("MSG_RESOURCE_QUERY", self._handle_resource_query)
         self.peer.register_message_handler("MSG_HEARTBEAT", self._handle_heartbeat)
         self.peer.register_message_handler("MSG_JOB_SUBMIT", self._handle_job_submit)
@@ -203,9 +204,9 @@ class ResourceAgent:
         self.peer.send(peer_id, "MSG_SUBMIT_ACK", response)
         self.logger.info(f"Job {app_id} accepted and queued")
 
-    def _handle_getstate(self, peer_id: str, message: Dict[str, Any]):
-        """Handle state query requests"""
-        self.logger.info(f"Received state query from {peer_id}")
+    def _handle_job_status_query(self, peer_id: str, message: Dict[str, Any]):
+        """Handle job status query requests"""
+        self.logger.info(f"Received job status query from {peer_id}")
         job_id = message.get('job_id', 'unknown')
         response = {
             "job_id": job_id,
@@ -214,7 +215,7 @@ class ResourceAgent:
             "resources_available": True,
             "queue_length": 0
         }
-        self.peer.send(peer_id, "MSG_STATE", response)
+        self.peer.send(peer_id, "MSG_STATE_INFO", response)
 
     def _handle_resource_query(self, peer_id: str, message: Dict[str, Any]):
         """Handle resource availability queries"""
