@@ -24,7 +24,6 @@ class SwarmchestrateClient:
         self.peer = None
         self.job_responses = {}
         self.job_complete = False
-        self._register_message_handlers()
 
         # Setup minimal logging
         logging.basicConfig(level=logging.WARNING)
@@ -118,7 +117,8 @@ class SwarmchestrateClient:
             enable_rejoin=False,
             metadata={"peer_type": "JOB_CLIENT", "client_id": self.client_id}
         )
- 
+
+        self._register_message_handlers()
         def on_entered():
             print(f"Connected to hub {hub_host}:{hub_port}")
 
