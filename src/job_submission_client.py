@@ -24,7 +24,7 @@ class SwarmchestrateClient:
         self.peer = None
         self.job_responses = {}
         self.job_complete = False
- 
+        self._register_message_handlers()
 
         # Setup minimal logging
         logging.basicConfig(level=logging.WARNING)
