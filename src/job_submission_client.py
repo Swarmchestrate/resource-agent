@@ -65,7 +65,21 @@ class SwarmchestrateClient:
         except Exception as e:
             print(f"Failed to load ask.yaml: {e}")
             return None
- 
+    def _register_message_handlers(self):
+        """Register handlers for different message types"""
+        self.peer.register_message_handler("MSG_STATE_INFO", self._handle_query_response)
+
+    def _handle_query_response(self, peer_id: str, message: dict[str, Any]):
+        """Handle job status query responses from RA"""
+        self.logger.info(f"Received job status response from {peer_id}")
+        job_id = message.get('job_id')
+        status = message.get('state')
+        if status == "unknown":
+            self.logger.error(f"Job {job_id} not found")
+        else:
+            self.logger.info(f"Job {job_id} status: {status}")
+        # Process the message as needed
+        # For example, update job status in internal records
 
     def handle_client_request(self, request_path):
         try:
@@ -244,7 +258,7 @@ class SwarmchestrateClient:
             )
             self.peer.leave()
             return
-        
+    
         # Process the message as needed
         # For example, store job status or resource allocation details
 def main():

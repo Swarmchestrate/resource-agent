@@ -1064,6 +1064,7 @@ class ResourceAgent:
                 }
             self.peer.send(ra_id, "MSG_CREATE_RESOURCE", msg_create_resource)
         self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
+        self._update_job_state(job_id, "Running")
 
     def _handle_create_resource(self, peer_id, message):
         """Process create resource request from LRA"""
