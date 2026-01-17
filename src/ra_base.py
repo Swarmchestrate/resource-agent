@@ -76,6 +76,7 @@ class ResourceAgent:
         # Ze-TODO: these values may not be needed anymore, tosca.get_cluster() function should return these values, but it is not implemented yet
         # Ze-TODO: Maybe these should be defined in the capacity file instead of config file
         self.ssh_key_path = self.config.get('ssh_key_path', '')
+        self.ssh_user = self.config.get('ssh_user', '')
         self.aws_ami = self.config.get('aws_ami', '')
         self.openstack_image_id = self.config.get('openstack_image_id', '')
         self.openstack_network_id = self.config.get('openstack_network_id', '')
@@ -898,7 +899,7 @@ class ResourceAgent:
                 f'"ami": "{self.aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
                 f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
                 f'"resource_name":"{node_name}",' # Ze: to think about how to name
-                f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
+                f'"ssh_user": "{self.ssh_user}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
             #    f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
                 f'"ssh_key": "{self.ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
                 f'"k3s_role": "{k3s_role}"}}' # Ze: this should be default 
@@ -911,13 +912,13 @@ class ResourceAgent:
                 f'"openstack_image_id": "{self.openstack_image_id}",'
                 f'"security_group_id": "",'
                 f'"volume_size": "10",'
-                f'"floating_ip_pool": "ext-net",'
+                #f'"floating_ip_pool": "ext-net",'
                 f'"network_id": "{self.openstack_network_id}",'
                 f'"cluster_name": "{job_id}",'
                 f'"resource_name":"{node_name}",'    
-                f'"ssh_user": "ubuntu",'
-                f'"ssh_key_name": "",'
-                f'"ssh_private_key_path": "{self.ssh_key_path}",'
+                f'"ssh_user": "{self.ssh_user}",'
+                #f'"ssh_key_name": "",'
+                f'"ssh_key": "{self.ssh_key_path}",'
                 f'"use_block_device": true,'
                 f'"k3s_role": "{k3s_role}"}}'
             )
@@ -927,7 +928,7 @@ class ResourceAgent:
                 f'"ha": false,'
                 f'"cluster_name": "{job_id}",'
                 f'"resource_name":"{node_name}",'
-                f'"ssh_user": "ec2-user",'
+                f'"ssh_user": "{self.ssh_user}",'
                 f'"ssh_key": "{self.ssh_key_path}",'
                 f'"ssh_auth_method": "key",'
                 f'"k3s_role": "{k3s_role}"}}'
@@ -1001,7 +1002,7 @@ class ResourceAgent:
             # Ze-done: Create registry secret on the LR using cluster-builder library
             registry_config = {
                 "master_ip": master_ip,
-                "ssh_user": "ec2-user", #Ze-TODO: ubuntu for openstack
+                "ssh_user": self.ssh_user, #Ze-TODO: ubuntu for openstack
                 "ssh_private_key_path": self.ssh_key_path,
                 "secret_names": ["regcred"] #optional
                 #"namespace":"test" , #optional
@@ -1018,7 +1019,8 @@ class ResourceAgent:
 
                 f'"master_ip": "{master_ip}",'
                 f'"ssh_key_path": "{self.ssh_key_path}",'
-                f'"ssh_user": "ec2-user"}}'
+                f'"ssh_user": "{self.ssh_user}"}}'
+                #f'"ssh_user": "ec2-user"}}'
             )
             cfg = json.loads(manifest_cfg)
             manifest_folder = Path(cfg["manifest_folder"])
@@ -1094,7 +1096,7 @@ class ResourceAgent:
                     f'"ami": "{self.aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
                     f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
                     f'"resource_name":"{node_name}",' # Ze: to think about how to name
-                    f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
+                    f'"ssh_user": "{self.ssh_user}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
                  #   f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
                     f'"ssh_key": "{self.ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
                     f'"k3s_role": "{k3s_role}",' # Ze: this should be default 
@@ -1113,7 +1115,7 @@ class ResourceAgent:
                     #f'"floating_ip_pool": "ext-net",'
                     f'"network_id": "{self.openstack_network_id}",'
                     f'"resource_name":"{node_name}",'    
-                    f'"ssh_user": "ubuntu",'
+                    f'"ssh_user": "{self.ssh_user}",'
                     #f'"ssh_key_name": "",'
                     f'"ssh_key": "{self.ssh_key_path}",'
                     f'"use_block_device": true,'
@@ -1128,7 +1130,7 @@ class ResourceAgent:
                     f'"edge_device_ip": "{self.edge_device_ip}",'
                     f'"ha": false,'
                     f'"resource_name":"{node_name}",'
-                    f'"ssh_user": "ec2-user",'
+                    f'"ssh_user": "{self.ssh_user}",'
                     f'"ssh_key": "{self.ssh_key_path}",'
                     f'"ssh_auth_method": "key",'
                     f'"k3s_role": "worker",'
