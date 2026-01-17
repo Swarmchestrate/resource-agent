@@ -622,7 +622,8 @@ class ResourceAgent:
         print("Valid resource combinations found. Selecting lead resource...") 
         # Ze-TODO: randomly select a resource's RA node as LR
         # Ze-DONE: for demo purpose, we hardcode the lead resource to be 'ra-aws-cloud-us'
-        self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
+        #self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
+        self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-sztaki-cloud-hu'), None)
         LR_id = self.job_offers[job_id][self.lead_resource[job_id]]["ra_id"]
         provider = self.job_offers[job_id][self.lead_resource[job_id]]["provider"]
         instance_type = self.job_offers[job_id][self.lead_resource[job_id]]["instance_type"]
