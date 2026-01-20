@@ -82,6 +82,7 @@ class ResourceAgent:
         self.openstack_network_id = self.config.get('openstack_network_id', '')
         self.edge_device_ip = self.config.get('edge_device_ip', '')
 
+        print(f"[DEBUG]SSH user is {self.ssh_user}")
         # Initialize P2P communication
         self.peer = None
         self.is_running = False
