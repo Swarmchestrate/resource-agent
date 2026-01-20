@@ -1143,6 +1143,7 @@ class ResourceAgent:
                     "openstack": worker_node_openstack,
                     "edge": worker_node_edge
                 }[cloud]
+            print(f"ssh_user is {self.ssh_user}")
             worker_node = json.loads(worker_node)
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             swarmchestrate.add_node(worker_node)
