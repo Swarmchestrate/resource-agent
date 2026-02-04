@@ -191,7 +191,9 @@ class ResourceAgent:
         self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
         self.peer.register_message_handler("MSG_CREATE_RESOURCE", self._handle_create_resource)
         self.peer.register_message_handler("MSG_CREATE_LEAD_RESOURCE", self._handle_create_lead_resource)
-        self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info)
+        #self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info)
+        self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info_cb)
+
 
     # Ze-TODO： this function may not be needed anymore
     def _handle_submit(self, peer_id: str, message: Dict[str, Any]):
@@ -1136,6 +1138,25 @@ class ResourceAgent:
         self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
         self._update_job_state(job_id, "Running")
 
+    # sync wrapper for the library
+    def _handle_master_info_cb(self, peer_id, message):
+        # If we're already in an event loop (typical), schedule it
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # If no loop is running (rare), run it to completion
+            asyncio.run(self._handle_master_info(peer_id, message))
+            return
+
+        task = loop.create_task(self._handle_master_info(peer_id, message))
+
+        # optional: log exceptions instead of "Task exception was never retrieved"
+        def _log_task_result(t: asyncio.Task):
+            exc = t.exception()
+            if exc:
+                self.logger.exception("Error in _handle_master_info", exc_info=exc)
+
+        task.add_done_callback(_log_task_result)
 
     def _handle_create_resource(self, peer_id, message):
         """Process create resource request from LRA"""
