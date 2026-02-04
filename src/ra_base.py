@@ -1051,33 +1051,91 @@ class ResourceAgent:
             self.peer.send(message.get('hub_ra'), "MSG_MASTER_INFO", msg_master_info)
             self.logger.info(f"RA {self.ra_id} instantiates the lead resource")
 
-    def _handle_master_info(self, peer_id, message):
+    # def _handle_master_info(self, peer_id, message):
+    #     """Process master info from lead resource"""
+    #     self.logger.info(f"RA {self.ra_id} receives master info from {peer_id}")
+    #     job_id = message.get('job_id')
+    #     master_info = message.get('master_info', {})
+    #     k3s_token = master_info["k3s_token"]
+    #     cluster_name = master_info["cluster_name"]
+    #     master_ip = master_info["master_ip"]
+    #     self.job_offers[job_id][self.lead_resource[job_id]]["count"] -= 1
+    #     offer_info = self.job_offers[job_id]
+    #     #print(f"Master info received by main RA is: {master_info}")
+    #     for res in offer_info:
+    #         if offer_info[res]["count"] <=0:
+    #             continue
+    #         ra_id = offer_info[res]["ra_id"]
+    #         print(f"ra_id in offer_info is {ra_id}")
+    #         msg_create_resource = {
+    #                 "job_id": job_id,
+    #                 "hub_ra": self.peer.peer_id, 
+    #                 "lead_resource": False, 
+    #                 "timestamp": message.get('timestamp'),
+    #                 "instance": { "resource": offer_info[res], "k3s_role": "worker", "node-name": list(offer_info.keys())[list(offer_info.values()).index(offer_info[res])]},
+    #                 "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip}
+    #             }
+    #         self.peer.send(ra_id, "MSG_CREATE_RESOURCE", msg_create_resource)
+    #     self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
+    #     self._update_job_state(job_id, "Running")
+
+    
+    async def _handle_master_info(self, peer_id, message):
         """Process master info from lead resource"""
         self.logger.info(f"RA {self.ra_id} receives master info from {peer_id}")
-        job_id = message.get('job_id')
-        master_info = message.get('master_info', {})
+        import asyncio
+        job_id = message.get("job_id")
+        master_info = message.get("master_info", {})
+
         k3s_token = master_info["k3s_token"]
         cluster_name = master_info["cluster_name"]
         master_ip = master_info["master_ip"]
+
+        # decrement lead resource offer count while we fan out worker creates
         self.job_offers[job_id][self.lead_resource[job_id]]["count"] -= 1
         offer_info = self.job_offers[job_id]
-        #print(f"Master info received by main RA is: {master_info}")
-        for res in offer_info:
-            if offer_info[res]["count"] <=0:
+
+        tasks = []
+        for res, res_info in offer_info.items():
+            if res_info["count"] <= 0:
                 continue
-            ra_id = offer_info[res]["ra_id"]
+
+            ra_id = res_info["ra_id"]
             print(f"ra_id in offer_info is {ra_id}")
+
             msg_create_resource = {
-                    "job_id": job_id,
-                    "hub_ra": self.peer.peer_id, 
-                    "lead_resource": False, 
-                    "timestamp": message.get('timestamp'),
-                    "instance": { "resource": offer_info[res], "k3s_role": "worker", "node-name": list(offer_info.keys())[list(offer_info.values()).index(offer_info[res])]},
-                    "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip}
-                }
-            self.peer.send(ra_id, "MSG_CREATE_RESOURCE", msg_create_resource)
+                "job_id": job_id,
+                "hub_ra": self.peer.peer_id,
+                "lead_resource": False,
+                "timestamp": message.get("timestamp"),
+                "instance": {
+                    "resource": res_info,
+                    "k3s_role": "worker",
+                    "node-name": res,  # res is already the key / node name
+                },
+                "master_info": {
+                    "k3s_token": k3s_token,
+                    "cluster_name": cluster_name,
+                    "master_ip": master_ip,
+                },
+            }
+
+            # Approach 2: peer.send is blocking -> run it in a thread, schedule concurrently
+            tasks.append(
+                asyncio.create_task(
+                    asyncio.to_thread(self.peer.send, ra_id, "MSG_CREATE_RESOURCE", msg_create_resource)
+                )
+            )
+
+        # If you want "non-blocking" as in "don't wait at all", comment this out.
+        # Keeping it ensures sends are dispatched before we update state.
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        # restore lead count & update state
         self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
         self._update_job_state(job_id, "Running")
+
 
     def _handle_create_resource(self, peer_id, message):
         """Process create resource request from LRA"""
