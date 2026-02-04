@@ -627,6 +627,10 @@ class ResourceAgent:
         # Ze-DONE: for demo purpose, we hardcode the lead resource to be 'ra-aws-cloud-us'
         #self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
         import random
+        valid = [
+            k for k, v in self.job_offers[job_id].items()
+            if v.get("ra_id") is not None
+        ]
         self.lead_resource[job_id] = random.choice(valid) if valid else None
         #self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-sztaki-cloud-hu'), None)
         LR_id = self.job_offers[job_id][self.lead_resource[job_id]]["ra_id"]
