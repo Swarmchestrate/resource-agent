@@ -1140,6 +1140,7 @@ class ResourceAgent:
 
     # sync wrapper for the library
     def _handle_master_info_cb(self, peer_id, message):
+        import asyncio
         # If we're already in an event loop (typical), schedule it
         try:
             loop = asyncio.get_running_loop()
