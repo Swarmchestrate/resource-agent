@@ -1,10 +1,13 @@
 RA_id: "<RA_ID>"                # e.g., "Aws-UK-RA"
 universe_id: "<UNIVERSE_ID>"    # e.g., "swarmchestrate_universe"
-credentials:
-  provider: "<PROVIDER>"        # e.g., "aws"
-  access_key: "<ACCESS_KEY>"    # Your cloud access key
-  secret_key: "<SECRET_KEY>"    # Your cloud secret key
 api_port: <API_PORT>            # e.g., 5000
 p2p_port: <P2P_PORT>            # e.g., 5000
-domain: "<DOMAIN>"              # e.g., "0.0.0.0"
+#domain: "<DOMAIN>"              # e.g., "0.0.0.0"
+ssh_key_path: ""                # e.g., path to the ssh key for accessing VMs/edge devices
+aws_ami: ""                     # e.g., aws ami id to create aws instances (will not be defined at here after tosca's patch concrete resource function is ready)
+openstack_image_id: ""          # e.g., openstack image id to create openstack instances (will not be defined at here after tosca's patch concrete resource function is ready)
+openstack_network_id: ""        # e.g., openstack network id to create openstack instances (will not be defined at here after tosca's patch concrete resource function is ready)
+edge_device_ip: ""              # e.g., edge device ip, currently only support one edge device per RA (will support multiple edge devices and will not be defined at here after capacity library is ready)
+hub_ra_ip: ""                   # e.g., "x.x.x.x" ip address of the main ra
 bootstrap_peers: []             # List of bootstrap peers, e.g., ["peer1:port", "peer2:port"]
+
