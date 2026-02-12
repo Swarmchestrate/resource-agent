@@ -21,6 +21,8 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+
+### RA
 Run the following command to instantiate an RA
 
 ```bash
@@ -30,7 +32,7 @@ python src/ra.py [arg1] [arg2]
 - `arg1` (Optional): Path to the RA configuration file. 
 - `arg2` (Optional): Path to the Capacity configuration file.
 
-  The templates of these config files are available in the config/ directory, arg1 template is ra-config.yaml and arg2 template is capacity-config.yaml.
+The templates of these config files are available in the config/ directory, arg1 template is ra-config.yaml and arg2 template is capacity-config.yaml.
 
 ### Client
 Run the Job submission client script to submit a request to select resources for a given application:
@@ -39,7 +41,7 @@ Run the Job submission client script to submit a request to select resources for
 python job_submission_client.py [arg1] 
 ```
 ### Arguments
-- `arg1` (Mandatory): Path to the YAML-based file. An example template can be found in client/template.yaml.
+- `arg1` (Mandatory): Path to the YAML-based submission file. One could submit/query/delete an application as defined in the submission file. An example template can be found in client/template.yaml.
 
 ### Cluster-builder
 The cluster-builder library requires environment varibles that store cloud credentials and container registry credentials. 
