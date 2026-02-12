@@ -6,6 +6,9 @@ The Resource Agent (RA) is a core component of Swarmchestrate with two main role
 ### Prerequisites
 - Python 3.12+
 - Virtual environment
+- puccini (For tosca library)
+- opentofu (For cluster-builder library)
+  
 
 ### Installation
 
@@ -20,14 +23,14 @@ source ra_env/bin/activate  # On Windows: ra_env\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Install puccini on linux (used by the tosca library):
+3. Install puccini on Linux:
 
 ```sh
 wget https://github.com/Swarmchestrate/tosca/releases/download/v0.2.4/go-puccini_0.22.7-SNAPSHOT-3e85b40_linux_amd64.deb
 sudo dpkg -i go-puccini_0.22.7-SNAPSHOT-3e85b40_linux_amd64.deb || sudo apt --fix-broken install -y
 ```
 
-4. Install opentofu (used by the cluster builder library) by following steps on https://opentofu.org/docs/intro/install/deb/ 
+4. Install opentofu on Linux by following steps on https://opentofu.org/docs/intro/install/deb/ 
 
 Download the installer script:
 ```sh
@@ -53,6 +56,7 @@ Remove the installer:
 ```sh 
 rm -f install-opentofu.sh
 ```
+
 
 ## Usage
 
