@@ -29,27 +29,27 @@ sudo dpkg -i go-puccini_0.22.7-SNAPSHOT-3e85b40_linux_amd64.deb || sudo apt --fi
 
 4. Install opentofu (used by the cluster builder library) by following steps on https://opentofu.org/docs/intro/install/deb/ 
 
-1) Download the installer script:
+Download the installer script:
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
 ```
 
-2) Give it execution permissions:
+Give it execution permissions:
 ```sh   
 chmod +x install-opentofu.sh
 ```
 
-3) Run the installer:
+Run the installer:
 ```sh   
 ./install-opentofu.sh --install-method deb
 ```
 
-4) Verify installation:
+Verify installation:
 ```sh
 tofu --version
 ```
 
-5) Remove the installer:
+Remove the installer:
 ```sh 
 rm -f install-opentofu.sh
 ```
