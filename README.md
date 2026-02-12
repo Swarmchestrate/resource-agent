@@ -20,9 +20,41 @@ source ra_env/bin/activate  # On Windows: ra_env\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Usage
+3. Install puccini on linux (used by the tosca library):
 
-### RA
+```sh
+wget https://github.com/Swarmchestrate/tosca/releases/download/v0.2.4/go-puccini_0.22.7-SNAPSHOT-3e85b40_linux_amd64.deb
+sudo dpkg -i go-puccini_0.22.7-SNAPSHOT-3e85b40_linux_amd64.deb || sudo apt --fix-broken install -y
+```
+
+4. Install opentofu (used by the cluster builder library) by following steps on https://opentofu.org/docs/intro/install/deb/ 
+
+1) Download the installer script:
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
+```
+
+2) Give it execution permissions:
+```sh   
+chmod +x install-opentofu.sh
+```
+
+3) Run the installer:
+```sh   
+./install-opentofu.sh --install-method deb
+```
+
+4) Verify installation:
+```sh
+tofu --version
+```
+
+5) Remove the installer:
+```sh 
+rm -f install-opentofu.sh
+```
+
+## Usage
 Run the following command to instantiate an RA
 
 ```bash
@@ -41,7 +73,7 @@ Run the Job submission client script to submit a request to select resources for
 python job_submission_client.py [arg1] 
 ```
 ### Arguments
-- `arg1` (Mandatory): Path to the YAML-based submission file. One could submit/query/delete an application as defined in the submission file. An example template can be found in client/template.yaml.
+- `arg1` (Mandatory): Path to the YAML-based file. An example template can be found in client/template.yaml.
 
 ### Cluster-builder
 The cluster-builder library requires environment varibles that store cloud credentials and container registry credentials. 
