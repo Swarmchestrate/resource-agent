@@ -19,7 +19,7 @@ swchp2pcom==0.4.1
 # Async support
 asyncio-mqtt==0.16.1
 # cluster-builder Library
-cluster-builder==0.4.4
+cluster-builder==0.4.5
 
 # Logging and monitoring
 python-json-logger==2.0.7
@@ -40,6 +40,6 @@ httpx==0.27.0
 msgpack==1.0.7
 
 # Tosca library
-Sardou==0.4.0
+Sardou==0.4.2
 #git+https://github.com/Swarmchestrate/tosca.git@main
 
