@@ -92,3 +92,10 @@ set -a
 . .env
 set +a 
 ```
+
+## Contact
+For any questions or feedback, feel free to reach out:
+
+- Email: a.ullah@napier.ac.uk
+- Email: z.wang3@napier.ac.uk
+- Email: s.alam2@napier.ac.uk
