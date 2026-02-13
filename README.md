@@ -1,9 +1,12 @@
 # Swarmchestrate - Resource Agent
 The Resource Agent (RA) is a core component of Swarmchestrate with two main roles: (1) abstracting and representing one or more Capacities to provide access to their resources, and (2) collaborating with other RAs to discover and allocate suitable resources across the full resource stack for submitted applications. This collaboration is enabled through the P2P network, which is automatically formed when RAs are instantiated.
 
-(TODO) Main functions:
+## Feature Status 
+This section outlines the key functions implemented in RA and the existing limitations.
 
-(TODO) Limitations:
+### Main functions:
+
+### Limitations:
 
 ## Quick Start
 
