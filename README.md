@@ -6,14 +6,41 @@ This section outlines the key functions implemented in RA and the existing limit
 
 ### Features:
 
-#### Hanling application submit request:
-Phase 1: Validates and processes application
-1) Validates the TOSCA file.
-2) Submits the Application Deployment Template (ADT) to the Knowledge Base (KB).
-3) Extracts resource requirements.
-4) Extracts QoS requirements for offer ranking.
+#### Handling application submit request:
+
+Step 1: Validate and Process Application
+
+- Validate the application’s TOSCA file.
+- Extract resource requirements and QoS requirements for offer generation and ranking.
+
+---
+
+Step 2: Perform Distributed Resource Discovery
+
+- Broadcast resource requirements to all participating RAs.
+- Each RA evaluates local resource availability and sends the results back to the main RA.
+
+---
+
+Step 3: Rank and Select Deployment Offer
+
+- The main RA compiles all feasible offers (an offer is a set of computing resources that fulfils the application’s resource requirements) based on the resource availability reported by each RA.
+- The main RA selects the best offer using an AI-based ranking algorithm.
+
+---
+
+Step 4: Provision Swarm Cluster
+
+- The main RA launches a Lead Resource (selected at random) and deploys the k3s master node on it using the Cluster Builder library.
+- The main RA prepares the Swarm Agent configuration files, copies the deployment manifests of all system components to the master node, and applies them.
+- The main RA launches the remaining resources and deploys k3s worker nodes to join the master node using the Cluster Builder library.
 
 
+#### Handling application query request:
+- Return the current status of the given application ID.
+
+#### Handling application delete request:
+- Destory the swarm of the given application ID.
 
 ### Limitations:
 
