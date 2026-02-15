@@ -5,7 +5,8 @@ The Resource Agent (RA) is a core component of Swarmchestrate with two main role
 This section outlines the key functions implemented in RA and the existing limitations.
 
 ### Features:
-Hanling application submit request:
+
+#### Hanling application submit request:
 Phase 1: Validates and processes application
 1) Validates the TOSCA file.
 2) Submits the Application Deployment Template (ADT) to the Knowledge Base (KB).
