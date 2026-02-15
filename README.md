@@ -44,6 +44,31 @@ Step 4: Provision Swarm Cluster
 
 ### Limitations:
 
+#### Handling application submit request:
+
+Step 1: Validates and processes application
+- Submits the Application Deployment Template (ADT) to the Knowledge Base (KB).
+- Extracts Monitoring metrics resource requirements, QoS requirements for offer generation and ranking.
+
+---
+
+Step 2: Perform Distributed Resource Discovery
+
+- Dynamically update RAs' capacity usage.
+  
+---
+
+Step 3: Rank and Select Deployment Offer
+- Integrate private ranking.
+
+---
+
+Step 4: Provision Swarm Cluster
+- Deploy monitoring system and AI reconfiguration agent.
+
+#### Handling capacity query request:
+- Return the capacity status of the given RA ID.
+
 ## Quick Start
 
 ### Prerequisites
