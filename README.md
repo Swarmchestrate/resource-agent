@@ -134,7 +134,7 @@ Run the following command to instantiate an RA
 ```bash
 python src/ra.py [arg1] [arg2]
 ```
-### Arguments
+#### Arguments
 - `arg1` (Optional): Path to the RA configuration file. 
 - `arg2` (Optional): Path to the Capacity configuration file.
 
@@ -146,7 +146,7 @@ Run the Job submission client script to submit a request to the main ra:
 ```bash
 python job_submission_client.py [arg1] 
 ```
-### Arguments
+#### Arguments
 - `arg1` (Mandatory): Path to the YAML-based submission file. One could submit/query/delete an application. An example template can be found in client/template.yaml.
 
 ### Cluster-builder
