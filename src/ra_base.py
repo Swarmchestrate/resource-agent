@@ -708,7 +708,7 @@ class ResourceAgent:
         # Find feasible resource combinations
         valid_combinations = self._find_valid_combinations(ra_responses, resource_names)
 
-        with open("valid_combinations.json", "w") as f:
+        with open("valid_combinations__.json", "w") as f:
             json.dump(valid_combinations, f, indent=2)
         if valid_combinations:
             print(f"Found {len(valid_combinations)} valid combination(s):")
