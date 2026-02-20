@@ -183,9 +183,10 @@ Requirements:
 
 
 Run the following commands to set up PostgreSQL in Docker:
+```bash
 docker rm pg-db || echo "No container to remove"
 docker run --name pg-db -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=adminpass -e POSTGRES_DB=swarmchestrate -p 5432:5432 -d postgres
-
+```
 
 
 
