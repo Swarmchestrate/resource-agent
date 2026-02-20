@@ -181,12 +181,114 @@ Option 2: Docker-Based Installation
 Requirements:
  - Docker (if you plan to use a Docker-based installation)
 
-
 Run the following commands to set up PostgreSQL in Docker:
 ```bash
 docker rm pg-db || echo "No container to remove"
 docker run --name pg-db -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=adminpass -e POSTGRES_DB=swarmchestrate -p 5432:5432 -d postgres
 ```
+
+## Universe Setup
+
+A Swarmchestrate universe consists of:
+
+- One **main Resource Agent**
+- One or more **additional Resource Agents**
+- A **PostgreSQL server**
+
+After successfully installing the Resource Agents and the PostgreSQL server, you must configure the Resource Agent configuration files and the environment variables required by the `cluster-builder` library.
+
+---
+
+### Step 1: Configure and Activate Environment Variables
+
+Edit the environment configuration file:
+
+```bash
+vim /cluster-builder-env/env
+```
+
+Update the following sections to match your setup:
+
+- `## PG Configuration` — PostgreSQL connection details  
+- `## AWS Auth` — AWS credentials  
+- `## OpenStack Auth` — OpenStack credentials  
+
+Then activate the environment variables:
+
+```bash
+cp /cluster-builder-env/env .env
+set -a
+. .env
+set +a
+```
+
+---
+
+### Step 2: Configure and Launch the Main Resource Agent
+
+Edit the main Resource Agent configuration:
+
+```bash
+vim config/ra-config.yaml
+```
+
+- Update all keys according to the provided comments.
+- Leave `bootstrap_peers: []` unchanged for the main Resource Agent.
+
+Edit the capacity configuration:
+
+```bash
+vim config/capacity-config.yaml
+```
+
+- Update the capacity values as needed.
+
+Launch the main Resource Agent:
+
+```bash
+python src/ra.py [arg1] [arg2]
+```
+
+---
+
+### Step 3: Configure and Launch Additional Resource Agents
+
+For each additional Resource Agent:
+
+Edit the configuration file:
+
+```bash
+vim config/ra-config.yaml
+```
+
+- Update all keys according to the comments.
+- Set `bootstrap_peers` to the main Resource Agent address:
+
+```yaml
+bootstrap_peers: ["<hub_ra_ip>:<port>"]
+```
+
+Edit the capacity configuration:
+
+```bash
+vim config/capacity-config.yaml
+```
+
+- Update the capacity values as needed.
+
+Launch the Resource Agent:
+
+```bash
+python src/ra.py [arg1] [arg2]
+```
+
+The agent will automatically join the main Resource Agent.
+
+
+
+---
+
+### Step 4: Configure and Launch Client
 
 
 
