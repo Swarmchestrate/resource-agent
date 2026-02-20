@@ -148,7 +148,7 @@ The templates of these config files are available in the config/ directory, arg1
 Run the Job submission client script to submit a request to the main ra:
 
 ```bash
-python job_submission_client.py [arg1] 
+python src/job_submission_client.py [arg1] 
 ```
 #### Arguments
 - `arg1` (Mandatory): Path to the YAML-based submission file. One could submit/query/delete an application. An example template can be found in client/template.yaml.
@@ -284,11 +284,23 @@ python src/ra.py [arg1] [arg2]
 
 The agent will automatically join the main Resource Agent.
 
-
-
 ---
 
-### Step 4: Configure and Launch Client
+### Step 4: Configure and Launch the Client
+
+Edit the client submission template:
+
+```bash
+vim /client/template.yaml
+```
+
+- Update all keys according to the provided comments.
+
+Launch the client and submit a request to the main Resource Agent:
+
+```bash
+python src/job_submission_client.py [arg1]
+```
 
 
 
