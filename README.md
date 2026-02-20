@@ -303,7 +303,7 @@ python src/job_submission_client.py [arg1]
 ```
 
 
-
+<!--
 ### Cluster-builder
 The cluster-builder library requires environment varibles that store cloud credentials and container registry credentials. 
 A template can be found in cluster-builder-env/env
@@ -315,6 +315,7 @@ set -a
 . .env
 set +a 
 ```
+-->
 
 ## Contact
 For any questions or feedback, feel free to reach out:
