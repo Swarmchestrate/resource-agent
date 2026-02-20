@@ -78,7 +78,7 @@ Step 4: Provision Swarm Cluster
 - opentofu (For cluster-builder library)
   
 
-### Installation
+### Prerequisites Installation
 
 1. Create and activate a virtual environment:
 ```bash
@@ -125,6 +125,10 @@ Remove the installer:
 rm -f install-opentofu.sh
 ```
 
+### RA Installation
+```sh
+git clone git@github.com:Swarmchestrate/resource-agent.git
+```
 
 ## Usage
 
@@ -148,6 +152,42 @@ python job_submission_client.py [arg1]
 ```
 #### Arguments
 - `arg1` (Mandatory): Path to the YAML-based submission file. One could submit/query/delete an application. An example template can be found in client/template.yaml.
+
+## Development Environment Setup
+
+This section outlines all the necessary steps to build a complete universe from the ground up.
+
+### Prerequisites
+- Resource Agent
+- PostgreSQL
+
+### Prerequisites Installation
+
+1. Install Resource Agent based on above installation guide
+   
+2. Install PostgreSQL
+
+
+Option 1: Service-Based Installation
+
+Follow the official PostgreSQL installation guide based on your OS:
+https://www.postgresql.org/download/
+
+For an example setup using steps relevant to this project, see:
+https://github.com/Swarmchestrate/cluster-builder/blob/main/docs/database_setup.md
+
+Option 2: Docker-Based Installation
+
+Requirements:
+ - Docker (if you plan to use a Docker-based installation)
+
+
+Run the following commands to set up PostgreSQL in Docker:
+docker rm pg-db || echo "No container to remove"
+docker run --name pg-db -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=adminpass -e POSTGRES_DB=swarmchestrate -p 5432:5432 -d postgres
+
+
+
 
 ### Cluster-builder
 The cluster-builder library requires environment varibles that store cloud credentials and container registry credentials. 
