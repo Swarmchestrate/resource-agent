@@ -15,6 +15,7 @@ from random import random
 import shutil as _shutil
 import json
 import logging
+import threading
 import yaml
 import time
 
@@ -1165,203 +1166,92 @@ class ResourceAgent:
         task.add_done_callback(_log_task_result)
         
     def _handle_create_resource(self, peer_id, message):
-        """
-        Sync callback entrypoint (called by peer library).
-        IMPORTANT: return quickly by scheduling the async worker.
-        """
-        import asyncio
+        import threading
+        thread = threading.Thread(
+            target=self._handle_create_resource_blocking,
+            args=(peer_id, message),
+            daemon=True,
+        )
+        thread.start()
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No loop running (rare) -> run to completion
-            print("No event loop running, running synchronously")
-            asyncio.run(self._handle_create_resource_async(peer_id, message))
-            return
-        print("Event loop detected, scheduling async task")
-        task = loop.create_task(self._handle_create_resource_async(peer_id, message))
-
-        def _log_task_result(t: asyncio.Task):
-            exc = t.exception()
-            if exc:
-                self.logger.exception("Error in _handle_create_resource_async", exc_info=exc)
-
-        task.add_done_callback(_log_task_result)
-        return  # <-- returns immediately (non-blocking)
-
-    async def _handle_create_resource_async(self, peer_id, message):
-        """
-        Actual work happens here.
-        Only change needed for non-blocking: run Swarmchestrate.add_node() in a thread.
-        """
-        import asyncio
-        import json
-
+    def _handle_create_resource_blocking(self, peer_id, message):
+        """Process create resource request from LRA"""
         self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
-        job_id = message.get("job_id")
-
-        instance = message.get("instance", {})
+        job_id = message.get('job_id')
+        instance = message.get('instance', {})
         instance_type = instance["resource"]["instance_type"]
         k3s_role = instance["k3s_role"]
         resource_name = instance["node-name"]
-
-        self.master_info = message.get("master_info")  # TODO: make job-specific if needed
+        self.master_info = message.get('master_info') # Ze-TODO: master info should be job_id specific
         cluster_name = self.master_info["cluster_name"]
         master_ip = self.master_info["master_ip"]
         k3s_token = self.master_info["k3s_token"]
-
         for i in range(instance["resource"]["count"]):
             cloud = instance["resource"]["provider"]
-
-            if instance["resource"]["count"] > 1:
+            if instance["resource"]["count"] >1:
                 node_name = f"{resource_name}-{i+1}"
             else:
                 node_name = resource_name
-
             worker_node_aws = (
-                f'{{"cloud": "{cloud}",'
-                f'"instance_type": "{instance_type}",'
-                f'"ha": false,'
-                f'"ami": "{self.aws_ami}",'
-                f'"security_group_id": "",'
-                f'"resource_name":"{node_name}",'
-                f'"ssh_user": "{self.ssh_user}",'
-                f'"ssh_key": "{self.ssh_key_path}",'
-                f'"k3s_role": "{k3s_role}",'
-                f'"k3s_token": "{k3s_token}",'
-                f'"master_ip": "{master_ip}",'
-                f'"cluster_name": "{cluster_name}"}}'
-            )
+                    f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
+                    f'"instance_type": "{instance_type}",'
+                    f'"ha": false,'
+                    f'"ami": "{self.aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
+                    f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
+                    f'"resource_name":"{node_name}",' # Ze: to think about how to name
+                    f'"ssh_user": "{self.ssh_user}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
+                 #   f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
+                    f'"ssh_key": "{self.ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
+                    f'"k3s_role": "{k3s_role}",' # Ze: this should be default 
+                    f'"k3s_token": "{k3s_token}",'
+                    f'"master_ip": "{master_ip}",'
+                    f'"cluster_name": "{cluster_name}"}}'
+                )
 
             worker_node_openstack = (
-                f'{{"cloud": "{cloud}",'
-                f'"openstack_flavor_id": "{instance_type}",'
-                f'"ha": false,'
-                f'"openstack_image_id": "{self.openstack_image_id}",'
-                f'"volume_size": "10",'
-                f'"network_id": "{self.openstack_network_id}",'
-                f'"resource_name":"{node_name}",'
-                f'"ssh_user": "{self.ssh_user}",'
-                f'"ssh_key": "{self.ssh_key_path}",'
-                f'"use_block_device": true,'
-                f'"k3s_role": "worker",'
-                f'"k3s_token": "{k3s_token}",'
-                f'"master_ip": "{master_ip}",'
-                f'"cluster_name": "{cluster_name}"}}'
-            )
+                    f'{{"cloud": "{cloud}",'
+                    f'"openstack_flavor_id": "{instance_type}",'
+                    f'"ha": false,'
+                    f'"openstack_image_id": "{self.openstack_image_id}",'
+                    #f'"security_group_id": "",'
+                    f'"volume_size": "10",'
+                    #f'"floating_ip_pool": "ext-net",'
+                    f'"network_id": "{self.openstack_network_id}",'
+                    f'"resource_name":"{node_name}",'    
+                    f'"ssh_user": "{self.ssh_user}",'
+                    #f'"ssh_key_name": "",'
+                    f'"ssh_key": "{self.ssh_key_path}",'
+                    f'"use_block_device": true,'
+                    f'"k3s_role": "worker",'
+                    f'"k3s_token": "{k3s_token}",'
+                    f'"master_ip": "{master_ip}",'
+                    f'"cluster_name": "{cluster_name}"}}' 
+                )
 
             worker_node_edge = (
-                f'{{"cloud": "{cloud}",'
-                f'"edge_device_ip": "{self.edge_device_ip}",'
-                f'"ha": false,'
-                f'"resource_name":"{node_name}",'
-                f'"ssh_user": "{self.ssh_user}",'
-                f'"ssh_key": "{self.ssh_key_path}",'
-                f'"ssh_auth_method": "key",'
-                f'"k3s_role": "worker",'
-                f'"k3s_token": "{k3s_token}",'
-                f'"master_ip": "{master_ip}",'
-                f'"cluster_name": "{cluster_name}"}}'
-            )
-
-            worker_node_str = {
-                "aws": worker_node_aws,
-                "openstack": worker_node_openstack,
-                "edge": worker_node_edge,
-            }[cloud]
-
-            worker_node = json.loads(worker_node_str)
-
-            # ✅ key change: run blocking provisioning in a background thread
-            await asyncio.to_thread(self._provision_node_blocking, worker_node)
-
-        self.logger.info(f"RA {self.ra_id} instantiates resource {resource_name} for job {job_id}")
-
-
-    def _provision_node_blocking(self, worker_node: dict):
-        """Blocking provisioning code (runs in a worker thread)."""
-        swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-        swarmchestrate.add_node(worker_node)
-
-
-    # def _handle_create_resource(self, peer_id, message):
-    #     """Process create resource request from LRA"""
-    #     self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
-    #     job_id = message.get('job_id')
-    #     instance = message.get('instance', {})
-    #     instance_type = instance["resource"]["instance_type"]
-    #     k3s_role = instance["k3s_role"]
-    #     resource_name = instance["node-name"]
-    #     self.master_info = message.get('master_info') # Ze-TODO: master info should be job_id specific
-    #     cluster_name = self.master_info["cluster_name"]
-    #     master_ip = self.master_info["master_ip"]
-    #     k3s_token = self.master_info["k3s_token"]
-    #     for i in range(instance["resource"]["count"]):
-    #         cloud = instance["resource"]["provider"]
-    #         if instance["resource"]["count"] >1:
-    #             node_name = f"{resource_name}-{i+1}"
-    #         else:
-    #             node_name = resource_name
-    #         worker_node_aws = (
-    #                 f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
-    #                 f'"instance_type": "{instance_type}",'
-    #                 f'"ha": false,'
-    #                 f'"ami": "{self.aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
-    #                 f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
-    #                 f'"resource_name":"{node_name}",' # Ze: to think about how to name
-    #                 f'"ssh_user": "{self.ssh_user}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
-    #              #   f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
-    #                 f'"ssh_key": "{self.ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
-    #                 f'"k3s_role": "{k3s_role}",' # Ze: this should be default 
-    #                 f'"k3s_token": "{k3s_token}",'
-    #                 f'"master_ip": "{master_ip}",'
-    #                 f'"cluster_name": "{cluster_name}"}}'
-    #             )
-
-    #         worker_node_openstack = (
-    #                 f'{{"cloud": "{cloud}",'
-    #                 f'"openstack_flavor_id": "{instance_type}",'
-    #                 f'"ha": false,'
-    #                 f'"openstack_image_id": "{self.openstack_image_id}",'
-    #                 #f'"security_group_id": "",'
-    #                 f'"volume_size": "10",'
-    #                 #f'"floating_ip_pool": "ext-net",'
-    #                 f'"network_id": "{self.openstack_network_id}",'
-    #                 f'"resource_name":"{node_name}",'    
-    #                 f'"ssh_user": "{self.ssh_user}",'
-    #                 #f'"ssh_key_name": "",'
-    #                 f'"ssh_key": "{self.ssh_key_path}",'
-    #                 f'"use_block_device": true,'
-    #                 f'"k3s_role": "worker",'
-    #                 f'"k3s_token": "{k3s_token}",'
-    #                 f'"master_ip": "{master_ip}",'
-    #                 f'"cluster_name": "{cluster_name}"}}' 
-    #             )
-
-    #         worker_node_edge = (
-    #                 f'{{"cloud": "{cloud}",'
-    #                 f'"edge_device_ip": "{self.edge_device_ip}",'
-    #                 f'"ha": false,'
-    #                 f'"resource_name":"{node_name}",'
-    #                 f'"ssh_user": "{self.ssh_user}",'
-    #                 f'"ssh_key": "{self.ssh_key_path}",'
-    #                 f'"ssh_auth_method": "key",'
-    #                 f'"k3s_role": "worker",'
-    #                 f'"k3s_token": "{k3s_token}",'
-    #                 f'"master_ip": "{master_ip}",'
-    #                 f'"cluster_name": "{cluster_name}"}}'   
-    #             )
-    #         worker_node = {
-    #                 "aws": worker_node_aws,
-    #                 "openstack": worker_node_openstack,
-    #                 "edge": worker_node_edge
-    #             }[cloud]
-    #         print(f"ssh_user is {self.ssh_user}")
+                    f'{{"cloud": "{cloud}",'
+                    f'"edge_device_ip": "{self.edge_device_ip}",'
+                    f'"ha": false,'
+                    f'"resource_name":"{node_name}",'
+                    f'"ssh_user": "{self.ssh_user}",'
+                    f'"ssh_key": "{self.ssh_key_path}",'
+                    f'"ssh_auth_method": "key",'
+                    f'"k3s_role": "worker",'
+                    f'"k3s_token": "{k3s_token}",'
+                    f'"master_ip": "{master_ip}",'
+                    f'"cluster_name": "{cluster_name}"}}'   
+                )
+            worker_node = {
+                    "aws": worker_node_aws,
+                    "openstack": worker_node_openstack,
+                    "edge": worker_node_edge
+                }[cloud]
+            print(f"ssh_user is {self.ssh_user}")
             
             
-    #         worker_node = json.loads(worker_node)
-    #         swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-    #         swarmchestrate.add_node(worker_node)
+            worker_node = json.loads(worker_node)
+            swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+            swarmchestrate.add_node(worker_node)
         
 
 	# # Ze-done: finish the RA which receives the msg and to create a VM
