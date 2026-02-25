@@ -1175,9 +1175,10 @@ class ResourceAgent:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             # No loop running (rare) -> run to completion
+            print("No event loop running, running synchronously")
             asyncio.run(self._handle_create_resource_async(peer_id, message))
             return
-
+        print("Event loop detected, scheduling async task")
         task = loop.create_task(self._handle_create_resource_async(peer_id, message))
 
         def _log_task_result(t: asyncio.Task):
