@@ -8,11 +8,14 @@ Handles P2P communication and resource matching
             
 #import random
 
+import asyncio
+from email.mime import message
 import os as _os
 from random import random
 import shutil as _shutil
 import json
 import logging
+import threading
 import yaml
 import time
 
@@ -708,6 +711,8 @@ class ResourceAgent:
         # Find feasible resource combinations
         valid_combinations = self._find_valid_combinations(ra_responses, resource_names)
 
+        with open("valid_combinations__.json", "w") as f:
+            json.dump(valid_combinations, f, indent=2)
         if valid_combinations:
             print(f"Found {len(valid_combinations)} valid combination(s):")
             print("-" * 60)
@@ -1159,8 +1164,17 @@ class ResourceAgent:
                 self.logger.exception("Error in _handle_master_info", exc_info=exc)
 
         task.add_done_callback(_log_task_result)
-
+        
     def _handle_create_resource(self, peer_id, message):
+        import threading
+        thread = threading.Thread(
+            target=self._handle_create_resource_blocking,
+            args=(peer_id, message),
+            daemon=True,
+        )
+        thread.start()
+
+    def _handle_create_resource_blocking(self, peer_id, message):
         """Process create resource request from LRA"""
         self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
         job_id = message.get('job_id')
@@ -1233,13 +1247,15 @@ class ResourceAgent:
                     "edge": worker_node_edge
                 }[cloud]
             print(f"ssh_user is {self.ssh_user}")
+            
+            
             worker_node = json.loads(worker_node)
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             swarmchestrate.add_node(worker_node)
         
 
-	# Ze-done: finish the RA which receives the msg and to create a VM
-        self.logger.info(f"RA {self.ra_id} instantiates resource {resource_name} for job {job_id}")
+	# # Ze-done: finish the RA which receives the msg and to create a VM
+    #     self.logger.info(f"RA {self.ra_id} instantiates resource {resource_name} for job {job_id}")
 
     def connect_to_network(self):
         """Connect to P2P network using bootstrap peers"""
