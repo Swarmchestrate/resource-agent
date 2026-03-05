@@ -27,8 +27,6 @@ DOCKER_USERNAMES=
 DOCKER_PASSWORDS=
 
 # KB Configuration
-KB_ENABLE=TRUE
 KB_BASE_URL=http://optimusdb.swarmchestrate.sztaki.hu
 KB_CONTEXT=swarmkb
-KB_LOG_LEVEL=INFO
 KB_TIMEOUT=10

@@ -3,13 +3,9 @@
 Swarmchestrate Client
 Submits resource requests to RA network and compiles responses
 """
-import base64
-import hashlib
 from email import message
 from typing import Any
-import requests
 import yaml
-import os
 import time
 import logging
 import sys
@@ -199,16 +195,6 @@ class SwarmchestrateClient:
         if not ask_data:
             return False
 
-        kb_enable = os.environ.get("KB_ENABLE","TRUE").lower() == "true"
-        if kb_enable:
-            # Attempt to upload SAT to KB 
-            if not ask_data:
-                self.logger.error("Failed to load tosca from %s", tosca_path)
-                return False
-            try:
-                self._upload_to_kb(ask_data)
-            except Exception as e:
-                self.logger.warning("KB upload helper raised unexpected error: %s", e)
         print(ask_data)
         print("Swarmchestrate Job Submission Client")
         print("=" * 60)
@@ -269,45 +255,6 @@ class SwarmchestrateClient:
     
         # Process the message as needed
         # For example, store job status or resource allocation details
-
-    def _upload_to_kb(self, tosca_data, store_full_structure: bool = True) -> bool:
-        """Serialize and upload the provided tosca data to the KB."""
-        try:
-            tosca_b64 = base64.b64encode(yaml.safe_dump(tosca_data, sort_keys=False).encode("utf-8")).decode("utf-8")
-        except Exception as e:
-            self.logger.warning("Failed to base64-encode tosca data: %s", e)
-            return False
-
-        filename=hashlib.sha256(tosca_b64.encode("utf-8")).hexdigest()[:16]
-        payload = {
-            "file": tosca_b64,
-            "filename": filename,
-            "store_full_structure": store_full_structure
-        }
-
-        kb_base = os.environ.get("KB_BASE_URL")
-        kb_timeout = int(os.environ.get("KB_TIMEOUT",30))
-        kb_context = os.environ.get("KB_CONTEXT")
-        upload_url = kb_base.rstrip('/') + '/' + 'optimusdb1' + '/' + kb_context.strip('/') + '/upload'
-
-        try:
-            response = requests.post(
-                upload_url, 
-                json=payload, 
-                timeout=kb_timeout, 
-                headers={'Content-Type': 'application/json'}
-            )
-            response.raise_for_status()
-            try:
-                self.logger.info("KB upload response: %s", response.json())
-                print(f"KB upload response: %s {0}", response.json())
-            except Exception:
-                self.logger.info("KB upload succeeded (non-JSON response)")
-            return True
-        except requests.RequestException as e:
-            self.logger.warning("KB upload failed: %s", e)
-            return False
-
 
     def _handle_query_response(self, peer_id: str, message: dict[str, Any]):
         """Handle job status query responses from RA"""
