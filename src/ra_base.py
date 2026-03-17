@@ -70,8 +70,6 @@ class ResourceAgent:
                 print(exc)
         self.capreg.initialize_capacity_by_content(capacity_content)
         
-        #self.capreg.initialize_capacity_from_file(self.capacity_file)
-        # print(f"[DEBUG] Loaded capacity for RA {self.config.get('RA_id')}: {self.capreg.capacity}")
         self.capacity = self._load_config(capacity_file) if capacity_file else {}
         
         self.job_tosca = {} # store the tosca of each job [job_id]
@@ -203,13 +201,6 @@ class ResourceAgent:
         job_id = message.get('job_id')
         offers_all = self.capreg.resource_offer_query_all(job_id)
         self.capreg.resources_and_offers_destroy_all(job_id)
-        # for msid in offers_all.keys():
-        #     # TODO: not all msid has offerid, need to check if offerid exists before accessing it
-        #     if offerid := list(offers_all[msid].keys()):
-        #         offerid = offerid[0]
-        #         res_set = self.capreg.resource_set_get_from_offer(offerid, offers_all[msid][offerid])
-        #         if res_set is not None:
-        #             self.capreg.resource_set_undeployed(job_id, msid, res_set["restype"], res_set["resid"], res_set["count"])
         self.capreg.dump_capacity_registry_info()
     
     
@@ -300,9 +291,6 @@ class ResourceAgent:
             self.tosca[job_id] = Sardou('tosca.yaml') #(to validate, may fail if invalid)
             print(f"✅ Successfully validated submitted application tosca for job {job_id}")
             
-
-            # 2) (done) update state: if failed, 'failure';
-            # 3) (done) if successful, extract resource requirements from tosca object
             ask_yaml = self.tosca[job_id].get_requirements()
             self._update_job_state(job_id, "Initialising")
             client_id = message.get('client_id')
@@ -398,8 +386,6 @@ class ResourceAgent:
         job_id = message.get('job_id')
         client_id = message.get('client_id')
         ask_yaml = message.get('ask_yaml')
-        # Done: at here create a folder to store TOSCA
-        # print(f"Received ask_yaml: {ask_yaml}")
         save_path = f"./KB/tosca_{job_id}.yaml"
         with open(save_path, 'w') as f:
             yaml.dump(ask_yaml, f)
@@ -410,7 +396,7 @@ class ResourceAgent:
         # Process job requirements
         self._process_job_requirements(job_id, client_id, save_path, hub_ra)
 
-    # cap-lib-TODO: replace this _process_job_requirements func to support cap-lib
+    # cap-lib-DONE: replace this _process_job_requirements func to support cap-lib
     def _process_job_requirements(self, job_id: str, client_id: str, ask_yaml: str, hub_ra: str):
         self.logger.info(f"RA: {self.ra_id} Evaluating application {job_id} requirements")
 
@@ -434,7 +420,6 @@ class ResourceAgent:
         }
 
         all_ras = self.peer.find_peers({"peer_type": "RA"})
-        #print(f"Sending resource response to hub RA {hub_ra} from RA {self.ra_id}, total RAs in network: {len(all_ras)}")
         self.peer.send(hub_ra, "MSG_RESOURCE_RESPONSE", response_message)
     
 
@@ -465,16 +450,13 @@ class ResourceAgent:
             'provider': provider,
             'responses': responses
         }
-        #print(f"Updated job responses for job {job_id} from RA {ra_id}:")
-        #print("provider: ", provider)
-        #print(responses)
 
         # Check if all RAs have responded
         all_ras = self.peer.find_peers({"peer_type": "RA"})
         #here we need len(all_ras) + 1 because all_ras does not include the main ra, the main ra cannot be detected with the function self.peer.find_peers({"peer_type": "RA"}).
         if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
             print(f"All RAs have responded for job {job_id}. Compiling results...")
-            # cap-lib-TODO: this function compiles all combinations based on individual response
+            # cap-lib-Done: this function compiles all combinations based on individual response
             # a successful outcome of this function is the selected job offer, self.job_offers[job_id]
             self._compile_and_display_results(job_id)
         else:
@@ -548,7 +530,7 @@ class ResourceAgent:
             print("[ERROR] No valid lead resource found!")
             return
 
-        # cap-lib-TODO: Now, we should have selected an offer, it would be good to let individual RA know so that they can update capacity status
+        # cap-lib-DONE: Now, we should have selected an offer, it would be good to let individual RA know so that they can update capacity status
         # how to let them know? either sending a complete offer back with msg: update_capacity_status/the_selected_offer or send individual RA specific resource
         msg_selected_offer = {
                 "job_id": job_id,
@@ -586,7 +568,7 @@ class ResourceAgent:
         print("lens of job offer is: ",len(self.job_offers[job_id])-1)
 
     
-    # cap-lib-TODO: this function should be modified to create all combination
+    # cap-lib-DONE: this function should be modified to create all combination
     def _compile_and_display_results(self, job_id):
         """Compile and display resource allocation results"""
         print("\nCompiling resource offers...")
@@ -955,8 +937,6 @@ class ResourceAgent:
                             self.capreg.resource_offer_reject(offer_id, offer)
 
 
-        # this is accept, TODO is reject
-        #self.capreg.resource_offer_accept(accept_offer_id, accept_offer)
         self.capreg.dump_capacity_registry_info()
 
 
