@@ -10,14 +10,17 @@ Handles P2P communication and resource matching
 
 import asyncio
 from email.mime import message
+from fileinput import filename
 import os as _os
 from random import random
 import shutil as _shutil
 import json
 import logging
+import sys
 import threading
 import yaml
 import time
+from datetime import datetime
 
 from http.client import responses
 from typing import Dict, Any, Optional, List
@@ -40,8 +43,10 @@ from utility import extract_qos_priorities as get_qos_priorities
 from utility import generate_tosca_configmap as write_tosca_configmap
 from utility import generate_swarm_configmap as write_swarm_configmap   
 
-
-
+#cap-lib-Done:
+from swch_capreg import SwChCapacityRegistry
+# capreg.initialize_capacity_from_file("sztaki-capacity-raw.yaml")
+#
 
 
 
@@ -51,9 +56,22 @@ class ResourceAgent:
 
     def __init__(self, config_file: str, capacity_file: Optional[str] = None):
         """Initialize Resource Agent with configuration files"""
+        self.resource_lock = threading.Lock() # lock for synchronizing access to shared resource data structures
         self.config_file = config_file
         self.capacity_file = capacity_file
         self.config = self._load_config(config_file)
+        # cap-lib-Done: replace capacity registeration
+        print(f"[DEBUG] Initializing capacity registry for RA {self.config.get('RA_id')}")  
+        self.capreg = SwChCapacityRegistry(self.config.get('RA_id'))
+        with open(self.capacity_file) as stream:
+            try:
+                capacity_content = stream.read()
+            except yaml.YAMLError as exc:
+                print(exc)
+        self.capreg.initialize_capacity_by_content(capacity_content)
+        
+        #self.capreg.initialize_capacity_from_file(self.capacity_file)
+        # print(f"[DEBUG] Loaded capacity for RA {self.config.get('RA_id')}: {self.capreg.capacity}")
         self.capacity = self._load_config(capacity_file) if capacity_file else {}
         
         self.job_tosca = {} # store the tosca of each job [job_id]
@@ -86,7 +104,7 @@ class ResourceAgent:
         self.openstack_network_id = self.config.get('openstack_network_id', '')
         self.edge_device_ip = self.config.get('edge_device_ip', '')
 
-        print(f"[DEBUG]SSH user is {self.ssh_user}")
+        # print(f"[DEBUG]SSH user is {self.ssh_user}")
         # Initialize P2P communication
         self.peer = None
         self.is_running = False
@@ -162,7 +180,39 @@ class ResourceAgent:
         # update state
         self.job_states[job_id]["state"] = new_state
 
-    def _delete_job(self, job_id):
+    def _register_message_handlers(self):
+        """Register handlers for different message types"""
+        self.peer.register_message_handler("MSG_JOB_STATUS_QUERY", self._handle_job_status_query)
+    #    self.peer.register_message_handler("MSG_GETSTATE", self._handle_getstate)
+        self.peer.register_message_handler("MSG_RESOURCE_QUERY", self._handle_resource_query)
+        self.peer.register_message_handler("MSG_HEARTBEAT", self._handle_heartbeat)
+        self.peer.register_message_handler("MSG_JOB_SUBMIT", self._handle_job_submit)
+        self.peer.register_message_handler("MSG_JOB_DELETE", self._handle_job_delete)
+        self.peer.register_message_handler("MSG_JOB_BROADCAST", self._handle_job_broadcast)
+        self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
+        self.peer.register_message_handler("MSG_SELECTED_OFFER", self._handle_selected_offer)
+        self.peer.register_message_handler("MSG_CREATE_RESOURCE", self._handle_create_resource)
+        self.peer.register_message_handler("MSG_CREATE_LEAD_RESOURCE", self._handle_create_lead_resource)
+        self.peer.register_message_handler("MSG_DELETE_JOB_BROADCAST", self._handle_delete_job_broadcast)
+        #self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info)
+        self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info_cb)
+
+
+    def _handle_delete_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
+        """Handle job deletion broadcast from hub RA"""
+        job_id = message.get('job_id')
+        offers_all = self.capreg.resource_offer_query_all(job_id)
+        self.capreg.resources_and_offers_destroy_all(job_id)
+        # for msid in offers_all.keys():
+        #     # TODO: not all msid has offerid, need to check if offerid exists before accessing it
+        #     if offerid := list(offers_all[msid].keys()):
+        #         offerid = offerid[0]
+        #         res_set = self.capreg.resource_set_get_from_offer(offerid, offers_all[msid][offerid])
+        #         if res_set is not None:
+        #             self.capreg.resource_set_undeployed(job_id, msid, res_set["restype"], res_set["resid"], res_set["count"])
+        self.capreg.dump_capacity_registry_info()
+    
+    
         if job_id in self.job_states:
             del self.job_states[job_id]
 
@@ -181,36 +231,6 @@ class ResourceAgent:
         if job_id in self.lead_resource:
             del self.lead_resource[job_id]
 
-    def _register_message_handlers(self):
-        """Register handlers for different message types"""
-        self.peer.register_message_handler("MSG_SUBMIT", self._handle_submit)
-        self.peer.register_message_handler("MSG_JOB_STATUS_QUERY", self._handle_job_status_query)
-    #    self.peer.register_message_handler("MSG_GETSTATE", self._handle_getstate)
-        self.peer.register_message_handler("MSG_RESOURCE_QUERY", self._handle_resource_query)
-        self.peer.register_message_handler("MSG_HEARTBEAT", self._handle_heartbeat)
-        self.peer.register_message_handler("MSG_JOB_SUBMIT", self._handle_job_submit)
-        self.peer.register_message_handler("MSG_JOB_DELETE", self._handle_job_delete)
-        self.peer.register_message_handler("MSG_JOB_BROADCAST", self._handle_job_broadcast)
-        self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
-        self.peer.register_message_handler("MSG_CREATE_RESOURCE", self._handle_create_resource)
-        self.peer.register_message_handler("MSG_CREATE_LEAD_RESOURCE", self._handle_create_lead_resource)
-        #self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info)
-        self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info_cb)
-
-
-    # Ze-TODO： this function may not be needed anymore
-    def _handle_submit(self, peer_id: str, message: Dict[str, Any]):
-        """Handle job submission requests"""
-        self.logger.info(f"Received submit request from {peer_id}")
-        app_id = message.get('appid', 'unknown')
-        response = {
-            "appid": app_id,
-            "status": "accepted",
-            "ra_id": self.ra_id,
-            "message": "Job submission received and queued"
-        }
-        self.peer.send(peer_id, "MSG_SUBMIT_ACK", response)
-        self.logger.info(f"Job {app_id} accepted and queued")
 
     def _handle_job_status_query(self, peer_id: str, message: Dict[str, Any]):
         """Handle job status query requests"""
@@ -250,10 +270,25 @@ class ResourceAgent:
     def _handle_job_submit(self, peer_id: str, message: Dict[str, Any]):
         """Handle job submission from client - Hub RA only"""
         self.logger.info(f"Received application submission from {peer_id}")
-        job_id = message.get('job_id')
+
+        # TODO: as soon as job is received, job id should be created
+        client_id = message.get('client_id')
+        job_id = (datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_"+ client_id)
         self.job_states[job_id] = {}
         self._update_job_state(job_id, "Pending")
         self.job_clients[job_id] = message.get('client_id')
+
+
+        if client_id:
+            print("Sending SWARM ID response to client:", self.job_clients[job_id])
+            submit_response_message = {
+                    "swarm_id": job_id,
+                    "ra_id": self.ra_id,
+                    "result": "SWARM_ID_ASSIGNED",
+                    "message": "SWARM ID assigned successfully, now processing the application submission"
+                    }
+            self.peer.send(client_id, "MSG_SWARM_ID_RESPONSE", submit_response_message)        
+        
         ask_yaml = message.get('tosca')
         # initialise application tosca
         self.job_tosca[job_id] = ask_yaml
@@ -265,6 +300,7 @@ class ResourceAgent:
             self.tosca[job_id] = Sardou('tosca.yaml') #(to validate, may fail if invalid)
             print(f"✅ Successfully validated submitted application tosca for job {job_id}")
             
+
             # 2) (done) update state: if failed, 'failure';
             # 3) (done) if successful, extract resource requirements from tosca object
             ask_yaml = self.tosca[job_id].get_requirements()
@@ -286,7 +322,9 @@ class ResourceAgent:
                 broadcast_message = {
                     "job_id": job_id,
                     "client_id": client_id,
-                    "ask_yaml": ask_yaml,
+                    # cap-lib-TODO: replace requirements with tosca
+                    "ask_yaml" : self.job_tosca[job_id], #"tosca.yaml", #/ rm ask_yaml = self.tosca[job_id].get_requirements()
+                    #"ask_yaml": ask_yaml,
                     "timestamp": message.get('timestamp'),
                     "hub_ra": self.peer.peer_id
                     #"hub_ra": self.ra_id
@@ -297,9 +335,15 @@ class ResourceAgent:
                 for ra_id in other_ras:
                     self.peer.send(ra_id, "MSG_JOB_BROADCAST", broadcast_message)
                     self.logger.info(f"Broadcasted application to {ra_id}")
+                        # TODO: at here create a folder to store TOSCA
+
+                save_path = f"./KB/tosca_{job_id}.yaml"
+                with open(save_path, 'w') as f:
+                    yaml.dump(self.job_tosca[job_id], f)
+                print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
 
                 # Process locally as well
-                self._process_job_requirements(job_id, client_id, ask_yaml, self.peer.peer_id)            
+                self._process_job_requirements(job_id, client_id, save_path, self.peer.peer_id)            
             else:
                 self.logger.warning("Non-hub RA received direct job submission")
         except Exception as e:
@@ -312,10 +356,38 @@ class ResourceAgent:
         """Handle job deletion requests"""
         self.logger.info(f"Received submit job deletion request from {peer_id} to delete job {message.get('job_id')}")
         job_id = message.get('job_id')
+        if job_id not in self.job_offers:
+            self.logger.exception(
+                    f"Job {job_id} not found for deletion"
+                )
+            client_id = self.job_clients.get(job_id)
+            if client_id:
+                print("Sending delete response failure message to client:", client_id)
+                delete_response_message = {
+                        "job_id": job_id,
+                        "ra_id": self.ra_id,
+                        "result": "failure",
+                        "message": "Failed to delete job, job not found"
+                        }
+                self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)                
+                return None
+
+
+        msg_delete_job = {
+                    "job_id": job_id,
+                    "timestamp": message.get('timestamp'),
+                    "hub_ra": self.peer.peer_id
+        }
+        all_ras = self.peer.find_peers({"peer_type": "RA"})
+        all_ras += [self.ra_id] # add the main RA to the list of RAs to be informed, because the main RA also needs to update its capacity status based on the job deletion
+        for ra_id in all_ras:
+            self.peer.send(ra_id, "MSG_DELETE_JOB_BROADCAST", msg_delete_job)
+            self.logger.info(f"Broadcasted job deletion request to {ra_id}")
+        #self._delete_job(job_id)
         CLUSTER_NAME = job_id
         swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
         swarmchestrate.destroy(CLUSTER_NAME)
-        self._delete_job(job_id)
+        
         self.logger.info(f"Job {job_id} deleted successfully")
 
 
@@ -326,252 +398,47 @@ class ResourceAgent:
         job_id = message.get('job_id')
         client_id = message.get('client_id')
         ask_yaml = message.get('ask_yaml')
+        # Done: at here create a folder to store TOSCA
+        # print(f"Received ask_yaml: {ask_yaml}")
+        save_path = f"./KB/tosca_{job_id}.yaml"
+        with open(save_path, 'w') as f:
+            yaml.dump(ask_yaml, f)
+        print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
         hub_ra = message.get('hub_ra')
         all_ras = self.peer.find_peers({"peer_type": "RA"})
 
         # Process job requirements
-        self._process_job_requirements(job_id, client_id, ask_yaml, hub_ra)
+        self._process_job_requirements(job_id, client_id, save_path, hub_ra)
 
-    def _process_job_requirements(self, job_id: str, client_id: str, ask_yaml: Dict, hub_ra: str):
-        """ 
-            Ze:
-            Process job requirements against RA capacity
-            Each RA receives a JOB_BROADCAST msg with job requirements from the Hub RA.
-            Each RA evaluates the requirements and sends a RESOURCE_RESPONSE msg back to the Hub RA with their resource offers.
-        """
-
+    # cap-lib-TODO: replace this _process_job_requirements func to support cap-lib
+    def _process_job_requirements(self, job_id: str, client_id: str, ask_yaml: str, hub_ra: str):
         self.logger.info(f"RA: {self.ra_id} Evaluating application {job_id} requirements")
 
         if not self.capacity:
             self.logger.warning("No capacity data available for evaluation")
             return
 
-        # Evaluate each resource request
-        resource_responses = {}
-
-        for resource_name, resource_requirements in ask_yaml.items():
-            if not isinstance(resource_requirements, dict):
-                continue
-
-            self.logger.info(f"Evaluating application resource requirements for {resource_name}")
-
-            # Extract requirements and metadata
-            capabilities = resource_requirements.get('capabilities', {})
-            count = resource_requirements.get('count', 1)
-            metadata = resource_requirements.get('metadata', {})
-
-            # Binary evaluation - can we fulfill this requirement?
-            can_fulfill = self._evaluate_requirement(capabilities, count)
-
-            if can_fulfill:
-                self.logger.info(f"✅ {resource_name}: YES - Can fulfill requirement")
-                resource_responses[resource_name] = {
-                    "answer": "yes",
-                    "ra_id": self.ra_id,
-                    "provider": self.capacity.get('metadata', {}).get('resource-provider'),
-                    # Ze—done：double check this redundant field
-                    # Ze：in resource response handler， we only used provider field so the redundant field is removed
-                    #"resource_provider": self.capacity.get('metadata', {}).get('resource-provider'),
-                    "location": self._format_location(),
-                    "bid": self._create_bid(resource_name, capabilities, count),
-                    "resource_definition": self._create_resource_definition(resource_name, capabilities, count),
-                    "available_instances": self._get_matching_instances(capabilities),
-                    "estimated_setup_time": "2-5 minutes",
-                    "metadata": metadata
-                }
-            else:
-                self.logger.info(f"❌ {resource_name}: NO - Cannot fulfill requirement")
-                resource_responses[resource_name] = {
-                    "answer": "no",
-                    "ra_id": self.ra_id,
-                    "reason": "Insufficient capacity or incompatible requirements"
-                }
-
-        # # Ze: we need this condition because the hub RA does not received RESOURCE_RESPONSE sent from itself
-        # # Ze：with the latest P2P lib changes, the hub RA also receives its own sent messages, so this block is commented out
-        # if self.ra_id == hub_ra:
-        #     self.logger.info(f"Hub RA {self.ra_id} does not send RESOURCE_RESPONSE to itself")
-        #     if job_id not in self.job_responses:
-        #         self.job_responses[job_id] = {}
-        #     self.job_responses[job_id][self.ra_id] = {
-        #         'provider': self.capacity.get('metadata', {}).get('resource-provider'),
-        #         'responses': resource_responses
-        #     }
-        #     return
-        
-        # Send consolidated response to client
+        self.capreg.dump_capacity_registry_info()
+        offers = self.capreg.resource_offer_generate_from_SAT_file(job_id, ask_yaml)
+        print(yaml.dump(offers))
+    # Ze-comment: by far each RA returns its offer
+    # offers should be sent to the main RA now!
+       # Send consolidated response to client
         response_message = {
-            "job_id": job_id,
-            "ra_id": self.ra_id,
-            "provider": self.capacity.get('metadata', {}).get('resource-provider'),
-            "timestamp": time.time(),
-            "responses": resource_responses
+           "job_id": job_id,
+           "ra_id": self.ra_id,
+           "provider": self.capacity.get('metadata', {}).get('resource-provider'),
+           "timestamp": time.time(),
+           # cap-lib-TODO: replace resource_responses with offers, to achieve this, one need to output and compare them
+           "responses": offers
         }
 
         all_ras = self.peer.find_peers({"peer_type": "RA"})
         #print(f"Sending resource response to hub RA {hub_ra} from RA {self.ra_id}, total RAs in network: {len(all_ras)}")
         self.peer.send(hub_ra, "MSG_RESOURCE_RESPONSE", response_message)
-
-    def _evaluate_requirement(self, capabilities: Dict, count: int) -> bool:
-        """Evaluate if we can fulfill the requirement using simple evaluator"""
-        if not capabilities:
-            return True
-        
-        # Use the simple evaluation function
-        ask_requirements = {'capabilities': capabilities}
-        can_fulfill = can_fulfill_requirement(ask_requirements, self.capacity)
-        
-        if not can_fulfill:
-            self.logger.info("Requirements are not fulfilled")
-            return False
-          
-        # Find matching instances
-        suitable_instances = get_matching_instances(capabilities, self.capacity)
-        if not suitable_instances:
-            self.logger.info("Requirement fulfilled, but no suitable instances found")
-            return False
-        
-        # Verify quota availability
-        if not self._verify_quota(suitable_instances, count):
-            self.logger.info("Quota check failed")
-            return False
-        
-        self.logger.info(f"All checks passed! Suitable instances: {suitable_instances}")
-        return True
-
-    def _verify_quota(self, suitable_instances: List[str], count: int) -> bool:
-        """Verify quota availability for instances"""
-        our_quota = self.capacity.get('capacity', {}).get('instances_quota', {})
-         # ADDED: Handle flat structure - if no quota defined, assume single instance
-        if not our_quota and 'single-config' in suitable_instances:
-            return count <= 1
-
-        for instance_type in suitable_instances:
-            available_quota = our_quota.get(instance_type, 0)
-            if available_quota >= count:
-                return True
-
-        return False
-
-    def _create_bid(self, resource_name: str, capabilities: Dict, count: int) -> Dict:
-        """Create bid information for resource"""
-        suitable_instances = get_matching_instances(capabilities, self.capacity)
-        if not suitable_instances:
-            return {}
-
-        # Find most cost-effective instance
-        # Ze-DONE: we should use the smallest instance that fulfills the requirements.
-        our_pricing = self.capacity.get('pricing', {})
-        
-        # ADDED: Handle flat structure pricing
-        if isinstance(our_pricing, (int, float)):
-            best_cost = float(our_pricing)
-            best_instance = 'single-config'
-            our_capacity = self.capacity.get('capacity', {})
-            energy = our_capacity.get('energy-consumption', 0)
-            bandwidth = our_capacity.get('bandwidth', 0)
-        elif isinstance(our_pricing, str):
-            best_cost = float(our_pricing.replace('$', '').strip())
-            best_instance = 'single-config'
-            our_capacity = self.capacity.get('capacity', {})
-            energy = our_capacity.get('energy-consumption', 0)
-            bandwidth = our_capacity.get('bandwidth', 0)
-        else:
-            # Original instances logic
-            best_instance = min(suitable_instances, key=lambda x: our_pricing.get(x, float('inf')))
-            best_cost = our_pricing.get(best_instance, 0)
-            # Check if it's still a flat structure selected
-            if best_instance == 'single-config':
-                our_capacity = self.capacity.get('capacity', {})
-                energy = our_capacity.get('energy-consumption', 0)
-                bandwidth = our_capacity.get('bandwidth', 0)
-            else:
-                energy = self.capacity['capacity']['instances'][best_instance]['energy-consumption']
-                bandwidth = self.capacity['capacity']['instances'][best_instance]['bandwidth']
-        
-        return {
-            "instance_type": best_instance,
-            "cost_per_hour": best_cost,
-            "total_cost_per_hour": best_cost * count,
-            "currency": "credits",
-            "count": count,
-            "setup_fee": 0,
-            "minimum_duration": "1 hour",
-            "energy-consumption": energy,
-            "bandwidth": bandwidth
-            #"energy-consumption": self.capacity['capacity']['instances'][best_instance]['energy-consumption'],
-            #"bandwidth": self.capacity['capacity']['instances'][best_instance]['bandwidth']
-        }
-
-    def _create_resource_definition(self, resource_name: str, capabilities: Dict, count: int) -> Dict:
-        """Create resource definition for response"""
-        suitable_instances = get_matching_instances(capabilities, self.capacity)
-        if not suitable_instances:
-            return {}
-
-        best_instance = suitable_instances[0]
-        our_instances = self.capacity.get('capacity', {}).get('instances', {})
-        # ADDED: Handle flat structure
-        if not our_instances and best_instance == 'single-config':
-            matched_specs = self.capacity.get('capacity', {}).copy()
-        else:
-            matched_specs = our_instances.get(best_instance, {}).copy()
-        matched_specs['instance_type'] = best_instance
-
-        return {
-            "name": resource_name,
-            "type": "virtual_machine",
-            "count": count,
-            "specifications": matched_specs,
-            "operating_system": self.capacity.get('system', {}).get('os', {}),
-            "location": self.capacity.get('locality', {}),
-            "provider_info": {
-                "provider": self.credentials.get('provider'),
-                "resource_provider": self.capacity.get('metadata', {}).get('resource-provider'),
-                "capacity_provider": self.capacity.get('metadata', {}).get('capacity-provider')
-            }
-        }
-
-    def _get_matching_instances(self, capabilities: Dict) -> Dict:
-        """Get detailed information about matching instances"""
-        suitable_instances = get_matching_instances(capabilities, self.capacity)
-        our_instances = self.capacity.get('capacity', {}).get('instances', {})
-        our_quota = self.capacity.get('capacity', {}).get('instances_quota', {})
-        our_pricing = self.capacity.get('pricing', {})
-
-        matching = {}
-        # ADDED: Handle flat structure
-        if 'single-config' in suitable_instances:
-            capacity_section = self.capacity.get('capacity', {})
-            price = our_pricing if isinstance(our_pricing, (int, float)) else 0
-            if isinstance(our_pricing, str):
-                price = float(our_pricing.replace('$', '').strip())
-            
-            matching['single-config'] = {
-                "specifications": capacity_section,
-                "available_quota": 1,
-                "cost_per_hour": price,
-                "energy-consumption": capacity_section.get('energy-consumption', 0),
-                "bandwidth": capacity_section.get('bandwidth', 0)
-            }
-        else:
-            # Original instances logic
-            for instance_type in suitable_instances:
-                matching[instance_type] = {
-                    "specifications": our_instances.get(instance_type, {}),
-                    "available_quota": our_quota.get(instance_type, 0),
-                    "cost_per_hour": our_pricing.get(instance_type, 0)
-                }
+    
 
 
-        return matching
-
-    def _format_location(self) -> str:
-        """Format location string from capacity data"""
-        locality = self.capacity.get('locality', {})
-        city = locality.get('city', 'Unknown')
-        country = locality.get('country', 'Unknown')
-        return f"{city}, {country}"
     
     def _handle_resource_response(self, peer_id, message):
         """
@@ -598,12 +465,17 @@ class ResourceAgent:
             'provider': provider,
             'responses': responses
         }
+        #print(f"Updated job responses for job {job_id} from RA {ra_id}:")
+        #print("provider: ", provider)
+        #print(responses)
 
         # Check if all RAs have responded
         all_ras = self.peer.find_peers({"peer_type": "RA"})
         #here we need len(all_ras) + 1 because all_ras does not include the main ra, the main ra cannot be detected with the function self.peer.find_peers({"peer_type": "RA"}).
         if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
             print(f"All RAs have responded for job {job_id}. Compiling results...")
+            # cap-lib-TODO: this function compiles all combinations based on individual response
+            # a successful outcome of this function is the selected job offer, self.job_offers[job_id]
             self._compile_and_display_results(job_id)
         else:
             return
@@ -631,19 +503,70 @@ class ResourceAgent:
         # Ze-TODO: randomly select a resource's RA node as LR
         # Ze-DONE: for demo purpose, we hardcode the lead resource to be 'ra-aws-cloud-us'
         #self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
-        import random
-        valid = [
-            k for k, v in self.job_offers[job_id].items()
-            if v.get("ra_id") is not None
-        ]
-        self.lead_resource[job_id] = random.choice(valid) if valid else None
-        #self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-sztaki-cloud-hu'), None)
-        self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
-        LR_id = self.job_offers[job_id][self.lead_resource[job_id]]["ra_id"]
-        provider = self.job_offers[job_id][self.lead_resource[job_id]]["provider"]
-        instance_type = self.job_offers[job_id][self.lead_resource[job_id]]["instance_type"]
-
         
+        import random
+        # 1. Look inside the nested offer to see if it has an ra_id
+        valid = []
+        for ms_id, offers in self.job_offers[job_id].items():
+            # Get the first offer_id in this service
+            for offer_id, data in offers.items():
+                if data.get("ids", {}).get("ra_id"):
+                    valid.append(ms_id)
+                    break # Move to next microservice
+
+        # 2. Pick a Lead Resource
+        self.lead_resource[job_id] = random.choice(valid) if valid else None
+        # 1. Look inside the nested offers to find the specific RA ID
+        # This correctly handles: job_offers[job_id][ms_id][offer_id]['ids']['ra_id']
+        self.lead_resource[job_id] = next(
+            (ms_id for ms_id, offers in self.job_offers[job_id].items() 
+            if any(data.get('ids', {}).get('ra_id') == 'ra-aws-cloud-us' for data in offers.values())), 
+            #if any(data.get('ids', {}).get('ra_id') == 'ra-sztaki-cloud-hu' for data in offers.values())), 
+            None
+        )
+        print(f"[DEBUG] lead_resource for job {job_id} is {self.lead_resource[job_id]}")
+        # 3. Safely extract the details from the chosen Lead Resource
+        selected_ms = self.lead_resource[job_id]
+        if selected_ms:
+            # Get the keys and ensure there is at least one offer
+            offer_keys = list(self.job_offers[job_id][selected_ms].keys())
+            if not offer_keys:
+                print(f"[ERROR] Microservice {selected_ms} has no offers!")
+                return
+                
+            offer_id = offer_keys[0]
+            offer_data = self.job_offers[job_id][selected_ms][offer_id]
+            
+            # Using .get() for production safety
+            ids = offer_data.get("ids", {})
+            LR_id = ids.get("ra_id")
+            provider = ids.get("provider_id")
+            instance_type = ids.get("res_id") 
+            
+            print(f"[DEBUG] Lead Resource selected: {selected_ms} (RA: {LR_id})")
+        else:
+            print("[ERROR] No valid lead resource found!")
+            return
+
+        # cap-lib-TODO: Now, we should have selected an offer, it would be good to let individual RA know so that they can update capacity status
+        # how to let them know? either sending a complete offer back with msg: update_capacity_status/the_selected_offer or send individual RA specific resource
+        msg_selected_offer = {
+                "job_id": job_id,
+                "hub_ra": self.peer.peer_id,
+                "timestamp": message.get('timestamp'),
+                "offer_info": self.job_offers[job_id]
+        }
+            
+        all_ras = self.peer.find_peers({"peer_type": "RA"})
+        all_ras += [self.ra_id] # add the main RA to the list of RAs to be informed, because the main RA also needs to update its capacity status based on the selected offer
+        print("all_ras in the network are: ", all_ras)
+        for ra_id in all_ras:
+            #print(f"Sending selected offer to RA {ra_id} from RA {self.ra_id}")
+            self.peer.send(ra_id, "MSG_SELECTED_OFFER", msg_selected_offer)
+            #print(f"Sent selected offer to RA {ra_id} from RA {self.ra_id}")
+              
+
+
         print("Press a key to continue:")
         key_to_continue = input()
         msg_lead_resource_request_ra = {
@@ -662,8 +585,8 @@ class ResourceAgent:
         self.logger.info(f"Sent resource request to RA: {LR_id}")
         print("lens of job offer is: ",len(self.job_offers[job_id])-1)
 
-
-
+    
+    # cap-lib-TODO: this function should be modified to create all combination
     def _compile_and_display_results(self, job_id):
         """Compile and display resource allocation results"""
         print("\nCompiling resource offers...")
@@ -682,8 +605,9 @@ class ResourceAgent:
             return
 
         # Display response matrix
-        resource_names = sorted(all_resource_names)
         
+        resource_names = sorted(all_resource_names)
+        resource_names = self._get_independent_microservices(f"./KB/tosca_{job_id}.yaml") # override resource_names with the independent microservices extracted from TOSCA
         print("Response Summary:")
         print("-" * 60)
         
@@ -698,44 +622,82 @@ class ResourceAgent:
         for ra_id, ra_data in ra_responses.items():
             provider = ra_data['provider']
             responses = ra_data['responses']
+            
+            # TODO: may need to put provider back 
+            # row = f"{ra_id} ({provider})"[:29].ljust(30)
+            row = f"{ra_id} "[:29].ljust(30)
+            # implement logic that answer is yes if resource is in the response and has 'ids' and 'characteristics' keys, otherwise is no
 
-            row = f"{ra_id} ({provider})"[:29].ljust(30)
             for resource_name in resource_names:
-                answer = responses.get(resource_name, {}).get('answer', 'N/A')
+                answer = "No"
+                if resource_name in responses:
+                    resource_data = responses[resource_name]
+
+                    # ignore colocated-only entries
+                    if not ("colocated" in resource_data and len(resource_data) == 1):
+                        if any(
+                            isinstance(v, dict) and "ids" in v and "characteristics" in v
+                            for v in resource_data.values()
+                        ):
+                            answer = "Yes"
+
                 row += f"{answer}"[:14].ljust(15)
             print(row)
 
         print("\nFinding valid combinations...")
         print("=" * 60)
-
+        #print(f"[DEBUG] resource_names: {resource_names}")
         # Find feasible resource combinations
+        ra_responses = self._transform_ra_responses(ra_responses) # transform the ra_responses to make it easier to find combinations
+        
+        with open("ra_responses.json", "w") as f:
+            json.dump(ra_responses, f, indent=2)
+
         valid_combinations = self._find_valid_combinations(ra_responses, resource_names)
 
         with open("valid_combinations__.json", "w") as f:
             json.dump(valid_combinations, f, indent=2)
+        
+        #filename = "valid_combinations.json"
+        #with open(filename, "r") as f:
+        #    valid_combinations = json.load(f)
+
+        # print(f"[DEBUG] Testing valid combinations loaded from file: {filename}")
+        
         if valid_combinations:
             print(f"Found {len(valid_combinations)} valid combination(s):")
             print("-" * 60)
             print("Possible offers:")
             
-            for i, combination in enumerate(valid_combinations, 1):
-                combo_str = f"{i}. "
-                
+            # Use .values() to get the dictionary data, not just the "combination_1" string
+            for i, combination in enumerate(valid_combinations.values(), 1):
                 resource_items = []
                 energy_consumption = 0
                 total_bandwidth = 0
                 total_price = 0
-                for resource_name in sorted(combination.keys()):
-                    allocation = combination[resource_name]
-                    ra_id = allocation['ra_id']
-                    energy_consumption += allocation['energy-consumption']
-                    total_price += allocation['cost_per_hour']
-                    total_bandwidth += allocation['bandwidth']
-                    resource_items.append(f"{resource_name}: {ra_id}")
-                
-                combo_str += ", ".join(resource_items)
+
+                # combination.keys() are now "details_v1", "ratings_v1", etc.
+                for ms_id in sorted(combination.keys()):
+                    # This is the inner dict (e.g., the "ra-fuelics..." key)
+                    offers = combination[ms_id]
+                    
+                    for offer_id, data in offers.items():
+                        ids = data['ids']
+                        chars = data['characteristics']
+                        
+                        # Update totals using the 'characteristics' keys from your JSON
+                        energy_consumption += chars.get('energy.consumption', 0)
+                        total_price += chars.get('pricing.cost', 0)
+                        
+                        # Bandwidth is a string in some JSONs, ensure it's an int
+                        total_bandwidth += int(chars.get('host.bandwidth', 0))
+                        
+                        ra_id = ids.get('ra_id', 'unknown')
+                        resource_items.append(f"{ms_id}: {ra_id}")
+
+                combo_str = f"{i}. " + ", ".join(resource_items)
                 print(combo_str)
-                print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}, total price is: {total_price}")
+                print(f"   >> Total energy: {energy_consumption:.2f} | Bandwidth: {total_bandwidth} | Price: {total_price:.2f}")
             print("-" * 60)
             
             # Randomly select one combination
@@ -744,7 +706,13 @@ class ResourceAgent:
             
             # Using AI algorithm to select the best combination
             selected_index = self._rank_resource_offers(valid_combinations, job_id)
-            selected_combination = valid_combinations[selected_index]
+            # Convert the NumPy index to a standard Python list of keys
+            combination_keys = list(valid_combinations.keys())
+
+            # Ensure the index is a standard Python int, then get the key name
+            selected_key = combination_keys[int(selected_index)]
+            selected_combination = valid_combinations[selected_key]
+            #selected_combination = valid_combinations[selected_index]
             
             print(f"\nSELECTED OFFER (chosen by the ranking algorithm: #{selected_index + 1}):")
             print("=" * 60)
@@ -753,14 +721,26 @@ class ResourceAgent:
             energy_consumption = 0
             total_bandwidth = 0
             total_price = 0
-            for resource_name in sorted(selected_combination.keys()):
-                allocation = selected_combination[resource_name]
-                count = allocation['count']
-                ra_id = allocation['ra_id']
-                energy_consumption += allocation['energy-consumption']
-                total_bandwidth += allocation['bandwidth']
-                total_price += allocation['cost_per_hour']
-                resource_items.append(f"{resource_name}: {ra_id}")
+            for ms_id in sorted(selected_combination.keys()):
+                offers = selected_combination[ms_id]
+            
+                # The JSON has an offer_id key (like 'ra-fuelics...') before the data
+                for offer_id, data in offers.items():
+                    ids = data.get('ids', {})
+                    chars = data.get('characteristics', {})
+                    
+                    # Check for 'count' safely; use 1 as default if missing
+                    count = data.get('count', 1) 
+                    
+                    ra_id = ids.get('ra_id', 'unknown')
+                    
+                    # Use the dot-notation keys from your actual JSON characteristics
+                    energy_consumption += chars.get('energy.consumption', 0)
+                    total_price += chars.get('pricing.cost', 0)
+                    total_bandwidth += int(chars.get('host.bandwidth', 0))
+                    
+                    resource_items.append(f"{ms_id}: {ra_id}")
+
             
             print(", ".join(resource_items))
             print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}, total price is: {total_price}")
@@ -782,6 +762,66 @@ class ResourceAgent:
         print(f"job_offer for job {job_id} is {self.job_offers[job_id]}")
         #self.peer.leave().addCallback(lambda _: self.peer.stop())
 
+
+    def _transform_ra_responses(self,input_data):
+        transformed = {}
+
+        for original_ra_key, content in input_data.items():
+            responses = content.get('responses', {})
+            
+            # Determine the target RA key from the actual data if possible
+            # We look for the first microservice that has real offers
+            target_ra_id = None
+            for ms_id, offers in responses.items():
+                if "colocated" not in offers:
+                    first_offer = next(iter(offers.values()))
+                    target_ra_id = first_offer.get('ids', {}).get('ra_id')
+                    break
+            
+            # Fallback to the original key if no offers are found
+            final_key = target_ra_id if target_ra_id else original_ra_key
+            
+            # Assign the stripped-down response directly
+            transformed[final_key] = responses
+
+        return transformed
+
+    def _get_independent_microservices(self,file_path):
+        """
+            Ze: 
+                This helper function identifies independent microservices as resources
+        """
+        import ruamel.yaml
+        yaml = ruamel.yaml.YAML(typ='safe')
+        with open(file_path, 'r') as f:
+            data = yaml.load(f)
+
+        # 1. Get all nodes that are of type swch:Microservice
+        node_templates = data.get('service_template', {}).get('node_templates', {})
+        all_ms = [
+            name for name, node in node_templates.items()
+            if node.get('type') == 'swch:Microservice'
+        ]
+
+        # 2. Identify services that are colocated (the "followers")
+        policies = data.get('service_template', {}).get('policies', [])
+        colocated_followers = set()
+
+        for policy in policies:
+            for policy_name, policy_details in policy.items():
+                # Look for Colocation policies
+                if policy_details.get('type') == 'swch:Scheduling.Colocation':
+                    targets = policy_details.get('targets', [])
+                    # If targets are [A, B], B is colocated with A.
+                    # We only need a separate resource for A.
+                    if len(targets) > 1:
+                        colocated_followers.update(targets[1:])
+
+        # 3. Filter out the followers from the main list
+        independent_ms = [ms for ms in all_ms if ms not in colocated_followers]
+
+        return sorted(independent_ms)
+
     def _rank_resource_offers(self,valid_combinations, job_id):
         """Rank resource offers based on QoS attributes using AI algorithm"""
         # Ze-done: Using the TOSCA library to fetch QoS priorities and populate them into the qos_priority template.
@@ -797,19 +837,29 @@ class ResourceAgent:
         energy_list = []
         bandwidth_list = []
         price_list = []
-        for combination in valid_combinations:
+                # Change 'for combination in valid_combinations:' to:
+        for combination_data in valid_combinations.values():
             total_energy = 0
             total_bandwidth = 0
             total_price = 0
-            for resource in combination.values():
-                total_energy += resource.get('energy-consumption', 0)
-                total_bandwidth += resource.get('bandwidth', 0)
-                total_price += resource.get('cost_per_hour', 0)
+            
+            # Since your JSON is nested: ms_id -> offer_id -> data
+            for ms_id, offers in combination_data.items():
+                for offer_id, resource_data in offers.items():
+                    # Access the 'characteristics' dictionary from your JSON
+                    chars = resource_data.get('characteristics', {})
+                    
+                    # Match the key names exactly as they appear in your JSON (with dots)
+                    total_energy += chars.get('energy.consumption', 0)
+                    total_bandwidth += int(chars.get('host.bandwidth', 0))
+                    total_price += chars.get('pricing.cost', 0)
+            
             energy_list.append(total_energy)
             bandwidth_list.append(total_bandwidth)
             price_list.append(total_price)
-            reliability_list.append(1) # Placeholder for reliability
-            latency_list.append(1)     # Placeholder for latency 
+            reliability_list.append(1) 
+            latency_list.append(1)
+
 
         offer_data = {
             "qos_priority": qos_priority,
@@ -830,51 +880,84 @@ class ResourceAgent:
         # Return first item if optimal_index is not empty
         return optimal_index[0]
 
-    def _find_valid_combinations(self, ra_responses, resource_names):
+    def _find_valid_combinations(self, offers_dict, resources_list):
+
         """Find all valid resource allocation combinations"""
-        valid_combinations = []
+            # 1. For each required resource, collect all concrete offers across all RAs
+        import itertools
+        #print(f"[DEBUG] offers_dict: {offers_dict}")
+        offers_per_resource = {}
+        for resource in resources_list:
+            offers_per_resource[resource] = []
+            for ra_id, ra_offers in offers_dict.items():
+                if resource not in ra_offers:
+                    continue
+                resource_offers = ra_offers[resource]
+                # Skip colocated entries (they have a single "colocated" key, not real offers)
+                if "colocated" in resource_offers:
+                    continue
+                # Each remaining key is an offer_id mapping to offer details
+                for offer_id, offer_data in resource_offers.items():
+                    offers_per_resource[resource].append({offer_id: offer_data})
 
-        # Map resources to capable RAs
-        resource_providers = {}
-        for resource_name in resource_names:
-            providers = []
-            for ra_id, ra_data in ra_responses.items():
-                response = ra_data['responses'].get(resource_name, {})
-                if response.get('answer') == 'yes':
-                    providers.append({
-                        'ra_id': ra_id,
-                        'provider': ra_data['provider'],
-                        'response': response
-                    })
-            resource_providers[resource_name] = providers
+        # 2. Cartesian product across per-resource offer lists
+        resource_keys = list(offers_per_resource.keys())
+        offer_lists = [offers_per_resource[r] for r in resource_keys]
+        combinations = list(itertools.product(*offer_lists))
 
-        # Check if all resources can be fulfilled
-        for resource_name, providers in resource_providers.items():
-            if not providers:
-                return []
-
-        # Generate all possible combinations
-        provider_lists = [resource_providers[name] for name in resource_names]
-
-        for combination_tuple in product(*provider_lists):
+        # 3. Format as numbered combinations dict
+        result = {}
+        for i, combo in enumerate(combinations, 1):
             combination = {}
-            for i, resource_name in enumerate(resource_names):
-                provider_info = combination_tuple[i]
-                response = provider_info['response']
-		# Ze: a combination is an offer that fulfills all resources
-                combination[resource_name] = {
-                    'ra_id': provider_info['ra_id'],
-                    'provider': provider_info['provider'],
-                    'cost_per_hour': response.get('bid', {}).get('cost_per_hour', 0),
-                    'count': response.get('bid', {}).get('count', 1),
-                    'instance_type': response.get('bid', {}).get('instance_type', 'unknown'),
-                    'energy-consumption': response.get('bid', {}).get('energy-consumption', 0),
-                    'bandwidth': response.get('bid', {}).get('bandwidth', 0)
-                }
+            for resource, offer in zip(resource_keys, combo):
+                combination[resource] = offer
+            result[f"combination_{i}"] = combination
 
-            valid_combinations.append(combination)
+        return result
 
-        return valid_combinations
+
+    # cap-lib-TODO:
+    def _handle_selected_offer(self, peer_id, message):
+        """
+            Ze:
+                This function takes the selected offer sent from the main RA, decide: 
+                offer generated -> offer accept (reserved -> assigned)
+                offer generated -> offer reject (reserve -> free)
+                
+                Note that when the application is deployed, 
+                
+                offer accept -> set deploy (assigned -> deployed)
+                offer delete / reconfigured -> set undeploy (assigned -> undeploy)
+        """
+        self.logger.info(f"RA {self.ra_id} received the selected offer, now it will update the capacity registry accordingly")
+        job_id = message.get('job_id')
+        the_selected_offer = message.get('offer_info', {})
+#        print(f"offer_info received by LR is {the_selected_offer}")
+
+        all_offers = self.capreg.resource_offer_query_all(job_id)
+        
+#        print(f"[DEBUG]all_offers in capacity registry for job {job_id} is {all_offers}")
+
+        self.capreg.dump_capacity_registry_info()
+        # for all resources
+        for ms_id in all_offers.keys():
+            # for all offers in the resource
+            for offer_id in all_offers[ms_id].keys():
+                # compare whether it should be accepted or rejected
+                for selected_ms, offers in the_selected_offer.items():
+                    if selected_ms != ms_id:
+                        continue
+                    for selected_offer_id, data in offers.items():
+                        offer = all_offers[ms_id][offer_id]
+                        if selected_offer_id == offer_id:
+                            self.capreg.resource_offer_accept(offer_id, offer)
+                        else:
+                            self.capreg.resource_offer_reject(offer_id, offer)
+
+
+        # this is accept, TODO is reject
+        #self.capreg.resource_offer_accept(accept_offer_id, accept_offer)
+        self.capreg.dump_capacity_registry_info()
 
 
     def _handle_create_lead_resource(self, peer_id, message):
@@ -887,17 +970,26 @@ class ResourceAgent:
 
         LR = message.get('lead_resource')
         lead_resource_name = message.get('leader_resource_name')
+        #print(f"[DEBUG]lead_resource_name is {lead_resource_name}")
         instance = message.get('instance', {})
         instance_type = instance["instance_type"]
+        #print(f"[DEBUG]instance_type is {instance_type}")
         k3s_role = instance["k3s_role"]
         node_name = instance["node-name"]
+        #print(f"[DEBUG]node_name is {node_name}")
         tosca = message.get('tosca', {})
         cloud = instance["cloud"]
+        #print(f"[DEBUG]cloud is {cloud}")
         #cloud = "openstack"
         #instance_type = "m2.small"
-        print(f"instance is {instance}")
+        #print(f"instance is {instance}")
         offer_info = message.get('offer_info', {})
-        print(f"offer_info received by LR is {offer_info}")
+        #print(f"offer_info received by LR is {offer_info}")
+
+        print("Press a key to continue:")
+
+
+        key_to_continue = input()
 
         # Ze-done: finish the RA which receives the msg and to create a VM
         if(LR):
@@ -906,6 +998,20 @@ class ResourceAgent:
             # 2. k3s cluster
             # Ze-done; make sure them can be correctly loaded on all clouds (sztaki, edge, aws_us)
 
+            ports = json.dumps([
+                {
+                    "from": 0,
+                    "to": 65535,
+                    "protocol": "tcp",
+                    "source": "0.0.0.0/0"
+                },
+                {
+                    "from": 0,
+                    "to": 65535,
+                    "protocol": "udp",
+                    "source": "10.0.0.0/16"
+                }
+            ])
             # For future automation, we need to make sure each RA has the required ssh key pair, security group, ami, etc for each provider.
             master_node_aws = (
                 f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
@@ -918,8 +1024,9 @@ class ResourceAgent:
                 f'"ssh_user": "{self.ssh_user}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
             #    f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
                 f'"ssh_key": "{self.ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
-                f'"k3s_role": "{k3s_role}"}}' # Ze: this should be default 
-            )
+                f'"k3s_role": "{k3s_role}",' # Ze: this should be default 
+                f'"custom_ingress_ports": {ports}}}'
+                )   
 
             master_node_openstack = (
                 f'{{"cloud": "{cloud}",'
@@ -952,6 +1059,7 @@ class ResourceAgent:
             master_node = {
                 "aws": master_node_aws,
                 "openstack": master_node_openstack,
+                "sztaki": master_node_openstack,  # Add sztaki here
                 "edge": master_node_edge
             }[cloud]
             master_node = json.loads(master_node)
@@ -959,14 +1067,23 @@ class ResourceAgent:
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             outputs = swarmchestrate.add_node(master_node)
 
+            # Add logic to update resource status in the registry based on the result of node creation
+            # cap-lib-DONE: assigned -> allocated          
+            
+            offers_all = self.capreg.resource_offer_query_all(job_id)
+            for msid in offers_all.keys():
+                if msid == node_name:
+                    offerid=list(offers_all[msid].keys())[0]
+                    res_set = self.capreg.resource_set_get_from_offer(offerid, offers_all[msid][offerid])
+                    if res_set is not None:
+                        self.capreg.resource_set_deployed(job_id, msid, res_set["restype"], res_set["resid"], res_set["count"])
+            self.capreg.dump_capacity_registry_info()
+
             k3s_token = outputs.get("k3s_token")
             cluster_name = outputs.get("cluster_name")
             master_ip = outputs.get("master_ip")
 
-
             print(f"[DEBUG] master ip is {master_ip}")
-            # After creating the lead resource;
-            # substract the count of the resource requirement for lead resource by one because it will be created
 
             
             # Ze-done: Prepare configmap of tosca file for SA
@@ -978,7 +1095,7 @@ class ResourceAgent:
             #        b) SA configmap: contains the SA configuration info
 
             folder_path = f"KB"
-            #import os
+            import os
             #import shutil
 
             _os.makedirs(folder_path, exist_ok=True)  # ✅ Creates folder if it doesn't exist
@@ -1015,6 +1132,37 @@ class ResourceAgent:
             # Ze-TODO: we need to make sure the hub RA ip is reachable by all RAs.
             write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.hub_ra_ip+"")
             
+            # Ze:TODO: translate tosca -> k3s manifest, this should be done in SA, but it requires puccini installation
+            self.logger.info("Converting Tosca into k3s manifests.")
+            #tpl = parse_tosca(self.tosca_path)
+
+            from ruamel.yaml import YAML
+            from sardou.manifestGenerator import get_kubernetes_manifest
+            
+            yaml_parser = YAML()
+            yaml_parser.default_flow_style = False
+
+            TOSCA_FILE = f"KB/{job_id}_tosca.yaml"
+            OUTPUT_FILE = f"k3s-{job_id}/application-manifest.yaml"
+            IMAGE_PULL_SECRET = "regcred"
+
+            path = Path(TOSCA_FILE)
+            if not path.exists():
+                sys.exit(f"Error: TOSCA file '{TOSCA_FILE}' not found.")
+
+            try:
+                manifests = get_kubernetes_manifest(TOSCA_FILE, image_pull_secret=IMAGE_PULL_SECRET)
+
+                if not manifests:
+                    sys.exit("Warning: No Kubernetes manifests generated.")
+                with open(OUTPUT_FILE, "w") as f:
+                    yaml_parser.dump_all(manifests, f)
+            except Exception as e:
+                sys.exit(f"Error: {e}")
+
+            print(f"✅ Kubernetes manifests written to '{OUTPUT_FILE}' ({len(manifests)} items)")
+
+
             # Ze-done: Create registry secret on the LR using cluster-builder library
             registry_config = {
                 "master_ip": master_ip,
@@ -1028,9 +1176,12 @@ class ResourceAgent:
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             swarmchestrate.create_registry_secrets(registry_config)
 
+            # Use absolute path to ensure OpenTofu can find it from any directory
+            absolute_path = os.path.abspath(f"k3s-{job_id}")
+
             # copy the manifests from k3s-{job_id}/ to the LR
             manifest_cfg = (
-                f'{{"manifest_folder": "/home/ubuntu/e2e-demo/ra/k3s-{job_id}",'
+                f'{{"manifest_folder": "{absolute_path}",'
 #                f'{{"manifest_folder": "/home/ubuntu/e2e-demo/k3s-{job_id}",'
 
                 f'"master_ip": "{master_ip}",'
@@ -1058,36 +1209,7 @@ class ResourceAgent:
             }
             self.peer.send(message.get('hub_ra'), "MSG_MASTER_INFO", msg_master_info)
             self.logger.info(f"RA {self.ra_id} instantiates the lead resource")
-
-    # def _handle_master_info(self, peer_id, message):
-    #     """Process master info from lead resource"""
-    #     self.logger.info(f"RA {self.ra_id} receives master info from {peer_id}")
-    #     job_id = message.get('job_id')
-    #     master_info = message.get('master_info', {})
-    #     k3s_token = master_info["k3s_token"]
-    #     cluster_name = master_info["cluster_name"]
-    #     master_ip = master_info["master_ip"]
-    #     self.job_offers[job_id][self.lead_resource[job_id]]["count"] -= 1
-    #     offer_info = self.job_offers[job_id]
-    #     #print(f"Master info received by main RA is: {master_info}")
-    #     for res in offer_info:
-    #         if offer_info[res]["count"] <=0:
-    #             continue
-    #         ra_id = offer_info[res]["ra_id"]
-    #         print(f"ra_id in offer_info is {ra_id}")
-    #         msg_create_resource = {
-    #                 "job_id": job_id,
-    #                 "hub_ra": self.peer.peer_id, 
-    #                 "lead_resource": False, 
-    #                 "timestamp": message.get('timestamp'),
-    #                 "instance": { "resource": offer_info[res], "k3s_role": "worker", "node-name": list(offer_info.keys())[list(offer_info.values()).index(offer_info[res])]},
-    #                 "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip}
-    #             }
-    #         self.peer.send(ra_id, "MSG_CREATE_RESOURCE", msg_create_resource)
-    #     self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
-    #     self._update_job_state(job_id, "Running")
-
-    
+ 
     async def _handle_master_info(self, peer_id, message):
         """Process master info from lead resource"""
         self.logger.info(f"RA {self.ra_id} receives master info from {peer_id}")
@@ -1100,16 +1222,32 @@ class ResourceAgent:
         master_ip = master_info["master_ip"]
 
         # decrement lead resource offer count while we fan out worker creates
-        self.job_offers[job_id][self.lead_resource[job_id]]["count"] -= 1
+        # [Ze-DEBUG]
+        # self.job_offers[job_id][self.lead_resource[job_id]]["count"] -= 1
         offer_info = self.job_offers[job_id]
 
         tasks = []
         for res, res_info in offer_info.items():
-            if res_info["count"] <= 0:
+            # [Ze-DEBUG
+            # if res_info["count"] <= 0:
+            #    continue
+
+            # [Ze-DEBUG]
+                # 1. Get the dictionary containing the actual data (ids/characteristics)
+            # This skips over the long "ra-aws-edge-uk_job_..." key
+            offer_data = next(iter(res_info.values()))
+            
+            # 2. Reach into the "ids" block to get the ra_id
+            ra_id = offer_data["ids"]["ra_id"]
+            print(f"Service: {res} | RA ID: {ra_id}")
+            #resource = offer_data["ids"]["res_id"]
+
+            if res == self.lead_resource[job_id]:
+                print(f"Skipping lead resource {res} with RA ID {ra_id}")
                 continue
 
-            ra_id = res_info["ra_id"]
-            print(f"ra_id in offer_info is {ra_id}")
+            # ra_id = res_info["ra_id"]
+            # print(f"ra_id in offer_info is {ra_id}")
 
             msg_create_resource = {
                 "job_id": job_id,
@@ -1127,7 +1265,7 @@ class ResourceAgent:
                     "master_ip": master_ip,
                 },
             }
-
+            print(f"[DEBUG] Sending create resource for {res} to RA {ra_id} with message: {msg_create_resource}")
             # Approach 2: peer.send is blocking -> run it in a thread, schedule concurrently
             tasks.append(
                 asyncio.create_task(
@@ -1141,7 +1279,8 @@ class ResourceAgent:
             await asyncio.gather(*tasks, return_exceptions=True)
 
         # restore lead count & update state
-        self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
+        # Ze-DEBUG 
+        #self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
         self._update_job_state(job_id, "Running")
 
     # sync wrapper for the library
@@ -1166,9 +1305,23 @@ class ResourceAgent:
         task.add_done_callback(_log_task_result)
         
     def _handle_create_resource(self, peer_id, message):
+        # import threading
+        # thread = threading.Thread(
+        #     target=self._handle_create_resource_blocking,
+        #     args=(peer_id, message),
+        #     daemon=True,
+        # )
+        # thread.start()
+
         import threading
+
+        def locked_execution(p_id, msg):
+            # This ensures only one thread runs the blocking logic at a time
+            with self.resource_lock:
+                self._handle_create_resource_blocking(p_id, msg)
+
         thread = threading.Thread(
-            target=self._handle_create_resource_blocking,
+            target=locked_execution,
             args=(peer_id, message),
             daemon=True,
         )
@@ -1179,19 +1332,28 @@ class ResourceAgent:
         self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
         job_id = message.get('job_id')
         instance = message.get('instance', {})
-        instance_type = instance["resource"]["instance_type"]
+        offer_data = next(iter(instance["resource"].values()))
+    
+        # 2. Reach into the "ids" block to get the ra_id
+        instance_type = offer_data["ids"]["res_id"]
+        #instance_type = instance["resource"]["instance_type"]
         k3s_role = instance["k3s_role"]
-        resource_name = instance["node-name"]
+       #resource_name = instance["node-name"]
+        resource_name = offer_data["ids"]["ms_id"]
         self.master_info = message.get('master_info') # Ze-TODO: master info should be job_id specific
         cluster_name = self.master_info["cluster_name"]
         master_ip = self.master_info["master_ip"]
         k3s_token = self.master_info["k3s_token"]
-        for i in range(instance["resource"]["count"]):
-            cloud = instance["resource"]["provider"]
-            if instance["resource"]["count"] >1:
-                node_name = f"{resource_name}-{i+1}"
-            else:
-                node_name = resource_name
+        print(f"[DEBUG] instance_type is {instance_type}, k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
+        for i in range(1):
+        
+        #for i in range(instance["resource"]["count"]):
+        #    cloud = instance["resource"]["provider"]
+            cloud = offer_data["ids"]["provider_id"]
+        #    if instance["resource"]["count"] >1:
+        #        node_name = f"{resource_name}-{i+1}"
+        #    else:
+            node_name = resource_name
             worker_node_aws = (
                     f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
                     f'"instance_type": "{instance_type}",'
@@ -1252,6 +1414,15 @@ class ResourceAgent:
             worker_node = json.loads(worker_node)
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             swarmchestrate.add_node(worker_node)
+
+            offers_all = self.capreg.resource_offer_query_all(job_id)
+            for msid in offers_all.keys():
+                if msid == node_name:
+                    offerid=list(offers_all[msid].keys())[0]
+                    res_set = self.capreg.resource_set_get_from_offer(offerid, offers_all[msid][offerid])
+                    if res_set is not None:
+                        self.capreg.resource_set_deployed(job_id, msid, res_set["restype"], res_set["resid"], res_set["count"])
+            self.capreg.dump_capacity_registry_info()
         
 
 	# # Ze-done: finish the RA which receives the msg and to create a VM
@@ -1309,6 +1480,5 @@ class ResourceAgent:
             "provider": self.credentials.get('provider'),
             "capacity_loaded": bool(self.capacity)
         }
-
 
 
