@@ -9,6 +9,7 @@ Handles P2P communication and resource matching
 #import random
 
 import asyncio
+import base64
 from email.mime import message
 from fileinput import filename
 import os as _os
@@ -20,6 +21,7 @@ import sys
 import threading
 import yaml
 import time
+import requests
 from datetime import datetime
 
 from http.client import responses
@@ -1461,4 +1463,140 @@ class ResourceAgent:
             "capacity_loaded": bool(self.capacity)
         }
 
+def _KB_base_config():
+    return {
+        "base": _os.environ.get("KB_BASE_URL", "http://optimusdb.swarmchestrate.sztaki.hu").rstrip("/"),
+        "timeout": int(_os.environ.get("KB_TIMEOUT", 10)),
+        "context": _os.environ.get("KB_CONTEXT", "swarmkb").strip("/")
+    }
 
+def upload_SAT_to_KB(swarm_id: str, SAT: Dict[str, Any]) -> Dict [str, Any]:
+    cfg = _KB_base_config()
+    upload_url = f"{cfg['base']}/optimusdb1/{cfg['context']}/upload"
+
+    try:
+        tosca_yaml = yaml.safe_dump(SAT, sort_keys=False)
+        tosca_b64 = base64.b64encode(tosca_yaml.encode("utf-8")).decode("utf-8")
+
+        payload = {
+            "file": tosca_b64,
+            "filename": swarm_id,
+            "store_full_structure": True
+        }
+
+        response = requests.post(
+            upload_url,
+            json=payload,
+            timeout=cfg["timeout"],
+            headers={"Content-Type": "application/json"},
+        )
+        response.raise_for_status()
+
+        try:
+            body = response.json()
+        # response JSON error handling
+        except ValueError:
+            return {
+                "success": False,
+                "error": "Invalid JSON response from KB",
+                "status_code": response.status_code,
+                "raw_response": response.text,
+            }
+
+        return {
+            "success": True,
+            "status_code": response.status_code,
+            "response": body,
+        }
+
+    # Handle the basic network related failures, HTTP errors, remote service problems
+    # Timeout, ConnectionError, HTTPError, TooManyRedirects
+    except requests.exceptions.RequestException as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "type": type(e).__name__,
+        }
+    # Any other exception e.g., JSON/YAML parsing failures, Missing keys, Type errors
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Unexpected error: {str(e)}",
+            "type": type(e).__name__,
+        }
+
+
+def download_SAT_from_KB(swarm_id: str) -> Dict[str, Any]:
+    cfg = _KB_base_config()
+    download_url = f"{cfg['base']}/optimusdb1/{cfg['context']}/command"
+
+    payload = {
+        "method": {"cmd": "crudget", "argcnt": 1},
+        "dstype": "dsswres",
+        "criteria": [{"_filename": swarm_id}],
+    }
+
+    try:
+        response = requests.post(
+            download_url,
+            json=payload,
+            timeout=cfg["timeout"],
+        )
+        response.raise_for_status()
+
+        try:
+            result = response.json()
+        except ValueError:
+            return {
+                "success": False,
+                "error": "Invalid JSON response from KB",
+                "status_code": response.status_code,
+                "raw_response": response.text,
+            }
+
+        data = result.get("data")
+        if not isinstance(data, list) or not data:
+            return {
+                "success": False,
+                "error": f"No SAT ({swarm_id}) returned from KB",
+                "status_code": response.status_code,
+            }
+
+        doc = data[0]
+        raw_yaml = doc.get("_original_yaml")
+        if not raw_yaml:
+            return {
+                "success": False,
+                "error": "_original_yaml not found in KB response",
+                "status_code": response.status_code,
+            }
+
+        try:
+            parsed_yaml = yaml.safe_load(raw_yaml)
+        except yaml.YAMLError as e:
+            return {
+                "success": False,
+                "error": f"Invalid YAML content: {str(e)}",
+            }
+
+        return {
+            "success": True,
+            "status_code": response.status_code,
+            "data": parsed_yaml,
+        }
+
+    # Handle the basic network related failures, HTTP errors, remote service problems
+    # Timeout, ConnectionError, HTTPError, TooManyRedirects
+    except requests.exceptions.RequestException as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "type": type(e).__name__,
+        }
+    # Any other exception e.g., JSON/YAML parsing failures, Missing keys, Type errors
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Unexpected error: {str(e)}",
+            "type": type(e).__name__,
+        }

@@ -25,3 +25,8 @@ TF_LOG_PATH=/tmp/swarmchestrate-tf.log
 DOCKER_REGISTRIES=
 DOCKER_USERNAMES=
 DOCKER_PASSWORDS=
+
+# KB Configuration
+KB_BASE_URL=http://optimusdb.swarmchestrate.sztaki.hu
+KB_CONTEXT=swarmkb
+KB_TIMEOUT=10

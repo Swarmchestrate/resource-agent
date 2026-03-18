@@ -195,6 +195,7 @@ class SwarmchestrateClient:
 
         if not ask_data:
             return False
+
         print(ask_data)
         print("Swarmchestrate Job Submission Client")
         print("=" * 60)
@@ -297,7 +298,6 @@ class SwarmchestrateClient:
     
         # Process the message as needed
         # For example, store job status or resource allocation details
-
 
     def _handle_query_response(self, peer_id: str, message: dict[str, Any]):
         """Handle job status query responses from RA"""
