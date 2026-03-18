@@ -317,6 +317,38 @@ set +a
 ```
 -->
 
+## Docker
+
+The image is published to `ghcr.io/swarmchestrate/resource-agent`. Tagged releases produce `latest` and semver tags; pushes to `main` produce the `dev` tag.
+
+```bash
+docker pull ghcr.io/swarmchestrate/resource-agent:latest
+```
+
+Config files must be mounted at runtime. Mount your configured `config/` directory into the container:
+
+```bash
+docker run -v ./config:/app/config ghcr.io/swarmchestrate/resource-agent:latest
+```
+
+To pass custom config file paths:
+
+```bash
+docker run -v ./config:/app/config ghcr.io/swarmchestrate/resource-agent:latest /app/config/ra-config.yaml /app/config/capacity-config.yaml
+```
+
+If the RA requires SSH access to provision VMs, mount the SSH key and ensure `ssh_key_path` in `ra-config.yaml` points to the mounted path (e.g., `/app/keys/my-key.pem`):
+
+```bash
+docker run -v ./config:/app/config -v ~/.ssh/my-key.pem:/app/keys/my-key.pem:ro ghcr.io/swarmchestrate/resource-agent:latest
+```
+
+Environment variables required by `cluster-builder` (cloud credentials, PostgreSQL config) should be passed via `--env-file`:
+
+```bash
+docker run -v ./config:/app/config --env-file .env ghcr.io/swarmchestrate/resource-agent:latest
+```
+
 ## Contact
 For any questions or feedback, feel free to reach out:
 
