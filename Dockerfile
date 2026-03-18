@@ -30,5 +30,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source
 COPY src/ ./src/
 
+# Create directories used at runtime
+RUN mkdir -p KB
+
 
 ENTRYPOINT ["python", "src/ra.py"]
