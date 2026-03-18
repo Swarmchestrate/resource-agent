@@ -3,6 +3,7 @@ universe_id: "<UNIVERSE_ID>"    # e.g., "swarmchestrate_universe"
 api_port: <API_PORT>            # e.g., 5000
 p2p_port: <P2P_PORT>            # e.g., 5000
 #domain: "<DOMAIN>"              # e.g., "0.0.0.0"
+ssh_user: ""                    # e.g., username of created VMs, "ec2-user" / "ubuntu"
 ssh_key_path: ""                # e.g., path to the ssh key for accessing VMs/edge devices
 aws_ami: ""                     # e.g., aws ami id to create aws instances (will not be defined at here after tosca's patch concrete resource function is ready)
 openstack_image_id: ""          # e.g., openstack image id to create openstack instances (will not be defined at here after tosca's patch concrete resource function is ready)
