@@ -155,7 +155,8 @@ class SwarmchestrateClient:
             enable_rejoin=False,
             metadata={"peer_type": "JOB_CLIENT", "client_id": self.client_id}
         )
- 
+
+        self.peer.register_message_handler("MSG_DELETE_RESPONSE", self._handle_delete_response)
         def on_entered():
             print(f"Connected to hub {hub_host}:{hub_port}")
 
@@ -209,6 +210,8 @@ class SwarmchestrateClient:
  
         # Register response handler
         self.peer.register_message_handler("MSG_SUBMIT_RESPONSE", self._handle_submit_response)
+        self.peer.register_message_handler("MSG_SWARM_ID_RESPONSE", self._handle_swarm_id_response)
+
         def on_entered():
             print(f"Connected to hub {hub_host}:{hub_port}")
 
@@ -252,6 +255,46 @@ class SwarmchestrateClient:
             )
             self.peer.leave()
             return
+        else:
+            self.logger.info(f"Job {job_id} submission succeeded")
+    
+    def _handle_swarm_id_response(self, peer_id: str, message: dict[str, Any]):
+        """Handle SWARM ID responses from RA"""
+        self.logger.info(f"Received SWARM ID response from {peer_id}")
+        swarm_id = message.get('swarm_id')
+        if not swarm_id:
+            self.logger.error(f"Job {swarm_id} failed to receive SWARM ID")
+            self.peer.leave()
+            return
+        else:
+            self.logger.info(f"Job {swarm_id} received SWARM ID: {swarm_id}")
+
+    def _handle_submit_response(self, peer_id: str, message: dict[str, Any]):
+        """Handle responses from RA"""
+        self.logger.info(f"Received job submit response from {peer_id}")
+        job_id = message.get('job_id')
+        result = message.get('result')
+        if result == "failure":
+            self.logger.error(f"Job {job_id} submission failed"
+            )
+            self.peer.leave()
+            return
+        else:
+            self.logger.info(f"Job {job_id} submission succeeded")
+
+
+    def _handle_delete_response(self, peer_id: str, message: dict[str, Any]):
+        """Handle responses from RA"""
+        self.logger.info(f"Received job delete response from {peer_id}")
+        job_id = message.get('job_id')
+        result = message.get('result')
+        if result == "failure":
+            self.logger.error(f"Job {job_id} deletion failed, not found or already deleted"
+            )
+            self.peer.leave()
+            return
+        else:
+            self.logger.info(f"Job {job_id} deletion succeeded")
     
         # Process the message as needed
         # For example, store job status or resource allocation details

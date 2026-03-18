@@ -37,9 +37,12 @@ python-dotenv==1.1.1
 httpx==0.27.0
 
 # Data serialization
-msgpack==1.0.7
+#msgpack==1.0.7
 
 # Tosca library
 Sardou==0.4.2
 #git+https://github.com/Swarmchestrate/tosca.git@main
+
+# cap_lib
+swchcapreg==0.1.1
 
