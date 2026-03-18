@@ -1,0 +1,140 @@
+tosca_definitions_version: tosca_2_0
+
+description: SZTAKI OpenStack Capacity Def
+
+metadata:
+  name: cap-os-sztaki
+  author: University of Westminster
+  date: 2026-02-05
+  version: 0.1
+  tags:
+  - provider: sztaki
+
+imports:
+- namespace: swch
+  url: https://raw.githubusercontent.com/Swarmchestrate/tosca/refs/heads/main/profiles/eu.swarmchestrate/profile.yaml
+
+node_types:
+
+  SZTAKIBase:
+    derived_from: swch:OpenStackCapacity
+    description: >
+      An base compute node from the SZTAKI provision
+    properties:
+      image_id:
+        default: b2be6f4e-ebd8-42af-a526-63691a4d90ea
+      project_id:
+        default: facbcbb71bab40c0a8934b3eda67d389
+      network_id:
+        default: eb47e022-fdf3-4f7c-83ef-1fe46ec8e6dc
+      security_groups:
+        default:
+        - 0eb63f2b-b656-47a1-a0e7-3da0a993379e
+      volume_size:
+        default: 20
+
+    capabilities:
+      host:
+        properties:
+          disk-size:
+            default: 20
+          bandwidth:
+            default: 1000
+      os:
+        properties:
+          type:
+            default: linux
+          version:
+            default: "22.04"
+          distribution:
+            default: ubuntu
+      resource:
+        properties:
+          provider:
+            default: SZTAKI
+          capacity-provider:
+            default: SZTAKI
+      network:
+        properties:
+          ipv4_enabled:
+            default: False
+          ipv6_enabled:
+            default: False
+          type:
+            default: ethernet
+      pricing:
+        properties:
+          cost:
+            default: 0.00
+      locality:
+        properties:
+          continent:
+            default: Europe
+          country:
+            default: Hungary
+          city:
+            default: Budapest
+      energy:
+        properties:
+          powered-type:
+            default: mains-powered
+          energy-type:
+            default: non-green
+
+service_template:
+  node_templates:
+    sztaki-capacity:
+      type: swch:OverallCapacity
+      capabilities:
+        capacity:
+          properties:
+            num-cpus: 40
+            mem-size: 1000
+
+    m2-medium:
+      type: SZTAKIBase
+      properties:
+        flavor_name: m2.medium
+        key_name: fuelics
+      capabilities:
+        capacity:
+          properties:
+            instances: 4
+        host:
+          properties:
+            num-cpus: 4
+            mem-size: 8
+        energy:
+          properties:
+            consumption: 0.10
+
+    m2-small:
+      type: SZTAKIBase
+      properties:
+        flavor_name: m2.small
+        key_name: fuelics
+      capabilities:
+        host:
+          properties:
+            num-cpus: 2
+            mem-size: 4
+        energy:
+          properties:
+            consumption: 0.10
+
+    m2-large:
+      type: SZTAKIBase
+      properties:
+        flavor_name: m2.large
+        key_name: fuelics
+      capabilities:
+        host:
+          properties:
+            num-cpus: 4
+            mem-size: 4
+        resource:
+          properties:
+            labels: {"key_name": "my_specific_resource"}
+        energy:
+          properties:
+            consumption: 0.10

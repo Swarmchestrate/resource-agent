@@ -1,0 +1,171 @@
+tosca_definitions_version: tosca_2_0
+
+description: UoW AWS Capacity Def
+
+metadata:
+  name: cap-aws-uow
+  author: University of Westminster
+  date: 2026-02-26
+  version: 0.1
+  tags:
+  - provider: uow
+
+imports:
+- namespace: swch
+  url: https://raw.githubusercontent.com/Swarmchestrate/tosca/refs/heads/main/profiles/eu.swarmchestrate/profile.yaml
+
+node_types:
+
+  UoWBase:
+    derived_from: swch:EC2Capacity
+    description: >
+      An base compute node from the UoW AWS provision
+    properties:
+      security_groups:
+        default:
+        - 0eb63f2b-b656-47a1-a0e7-3da0a993379e
+
+    capabilities:
+      host:
+        properties:
+          disk-size:
+            default: 8
+          bandwidth:
+            default: 1000
+      os:
+        properties:
+          type:
+            default: linux
+      resource:
+        properties:
+          provider:
+            default: UoW
+          capacity-provider:
+            default: UoW
+      network:
+        properties:
+          ipv4_enabled:
+            default: True
+          ipv6_enabled:
+            default: False
+          type:
+            default: ethernet
+      locality:
+        properties:
+          continent:
+            default: Europe
+          country:
+            default: United Kingdom
+          city:
+            default: London
+      energy:
+        properties:
+          powered-type:
+            default: mains-powered
+          energy-type:
+            default: non-green
+
+
+service_template:
+  node_templates:
+    t2-medium-ubuntu:
+      type: UoWBase
+      properties:
+        ami: ami-ubuntu
+        instance_type: t2.medium
+        key_name: g-key
+      capabilities:
+        capacity:
+          properties:
+            instances: 4
+        host:
+          properties:
+            num-cpus: 4
+            mem-size: 8
+        os:
+          properties:
+            version: "22.04"
+            distribution: ubuntu
+        pricing:
+          properties:
+            cost: 0.20
+        energy:
+          properties:
+            consumption: 0.10
+
+    t2-medium:
+      type: UoWBase
+      properties:
+        ami: ami-amalinux
+        instance_type: t2.medium
+        key_name: g-key
+      capabilities:
+        capacity:
+          properties:
+            instances: 4
+        host:
+          properties:
+            num-cpus: 4
+            mem-size: 8
+        os:
+          properties:
+            version: AL2023
+            distribution: amazon
+        pricing:
+          properties:
+            cost: 0.20
+        energy:
+          properties:
+            consumption: 0.10
+            
+    t2-large:
+      description: Large compute node on the default ubuntu image
+      type: UoWBase
+      properties:
+        ami: ami-defaultubuntu
+        instance_type: t2.large
+        key_name: g-key
+      capabilities:
+        capacity:
+          properties:
+            instances: 4
+        host:
+          properties:
+            num-cpus: 2
+            mem-size: 8
+        os:
+          properties:
+            version: "22.04"
+            distribution: ubuntu
+        pricing:
+          properties:
+            cost: 0.20
+        energy:
+          properties:
+            consumption: 0.10
+
+    t2-large-uow:
+      description: Large compute node on the custom UoW image
+      type: UoWBase
+      properties:
+        ami: ami-customuow
+        instance_type: t2.large
+        key_name: g-key
+      capabilities:
+        capacity:
+          properties:
+            instances: 4
+        host:
+          properties:
+            num-cpus: 2
+            mem-size: 8
+        os:
+          properties:
+            version: uow-2204
+            distribution: ubuntu
+        pricing:
+          properties:
+            cost: 0.20
+        energy:
+          properties:
+            consumption: 0.10

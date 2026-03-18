@@ -1,0 +1,277 @@
+tosca_definitions_version: tosca_2_0
+
+description: Istio Bookinfo as a Swarmchestrate SAT
+
+metadata:
+  name: bookinfo
+  author: you
+  date: "2026-01-21"
+  version: 1.0
+  tags:
+  - istio
+  - bookinfo
+  - demo
+
+imports:
+- namespace: swch
+  url: https://raw.githubusercontent.com/Swarmchestrate/tosca/refs/heads/main/profiles/eu.swarmchestrate/profile.yaml
+
+
+service_template:
+
+  node_templates:
+
+    ###########################################################################
+    # Swarm
+    ###########################################################################
+    swarm:
+      type: swch:Swarm
+      directives:
+      - substitute
+
+    ###########################################################################
+    # Details (deployment details-v1 + service details)
+    ###########################################################################
+    details_v1:
+      type: swch:Microservice
+      properties:
+        image: docker.io/istio/examples-bookinfo-details-v1:1.20.3
+        replicas: 1
+        labels:
+          app: details
+          version: v1
+          service: details
+        service_account: bookinfo-details
+        ports:
+        - port: 9080
+          targetPort: 9080
+          containerPort: 9080
+      capabilities:
+        metrics:
+          properties:
+            raw:
+            - name: cpu_util_instance
+              sensor: "Netdata"
+              config:
+                scope_contexts: k8s.cgroup.cpu
+                results-aggregation: SUM
+              collection_frequency: "30 sec"
+              collection_output: "all"
+            
+            composite:
+            - name: cpu_util_prct
+              formula: mean( cpu_util_instance )
+              collection_frequency: "30 sec"
+              collection_output: "all"
+              window_type: "sliding"
+              window_size: "5 min"
+              grouping: "per_zone"
+
+        slo-constraints:
+          properties:
+            name: cpu_utilization
+            metric: cpu_util_prct
+            operator: ">"
+            threshold: 80.0
+
+      requirements:
+      - host:
+          relationship:
+            properties:
+              ingress-rules:
+                - from: 80
+                  to: 80
+                  protocol: TCP
+          count: 1
+          node_filter:
+            $and:
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, num-cpus ]
+                  - 1
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, mem-size ]
+                  - 2
+              - $has_any_entry:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, network, explicit-tcp-allow ]
+                  - [ ALL, 80 ]
+
+
+    ###########################################################################
+    # Ratings (deployment ratings-v1 + service ratings)
+    ###########################################################################
+    ratings_v1:
+      type: swch:Microservice
+      properties:
+        image: docker.io/istio/examples-bookinfo-ratings-v1:1.20.3
+        replicas: 1
+        labels:
+          app: ratings
+          version: v1
+          service: ratings
+        service_account: bookinfo-ratings
+        ports:
+        - port: 9080
+          targetPort: 9080
+          containerPort: 9080
+      requirements:
+      - host:
+          count: 1
+          node_filter:
+            $and:
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, num-cpus ]
+                  - 1
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, mem-size ]
+                  - 2
+        
+
+
+    ###########################################################################
+    # Reviews (service reviews + deployments reviews-v1/v2/v3)
+    ###########################################################################
+    reviews_v1:
+      type: swch:Microservice
+      properties:
+        image: docker.io/istio/examples-bookinfo-reviews-v1:1.20.3
+        replicas: 1
+        labels:
+          app: reviews
+          version: v1
+          service: reviews
+        service_account: bookinfo-reviews
+        env:
+        - name: LOG_DIR
+          value: "/tmp/logs"
+        ports:
+        - port: 9080
+          targetPort: 9080
+          containerPort: 9080
+        volume_mounts:
+        - name: tmp
+          mount_path: /tmp
+        - name: wlp-output
+          mount_path: /opt/ibm/wlp/output
+      requirements:
+      - host: 
+          count: 1
+          node_filter:
+            $and:
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, num-cpus ]
+                  - 1
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, mem-size ]
+                  - 2
+
+    reviews_v2:
+      type: swch:Microservice
+      properties:
+        image: docker.io/istio/examples-bookinfo-reviews-v2:1.20.3
+        replicas: 1
+        labels:
+          app: reviews
+          version: v2
+          service: reviews
+        service_account: bookinfo-reviews
+        env:
+        - name: LOG_DIR
+          value: "/tmp/logs"
+        ports:
+        - port: 9080
+          targetPort: 9080
+          containerPort: 9080
+        volume_mounts:
+        - name: tmp
+          mount_path: /tmp
+        - name: wlp-output
+          mount_path: /opt/ibm/wlp/output
+      requirements:
+      - host:
+          count: 1
+          node_filter:
+            $and:
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, num-cpus ]
+                  - 1
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, mem-size ]
+                  - 2
+
+    reviews_v3:
+      type: swch:Microservice
+      properties:
+        image: docker.io/istio/examples-bookinfo-reviews-v3:1.20.3
+        replicas: 1
+        labels:
+          app: reviews
+          version: v3
+          service: reviews
+        service_account: bookinfo-reviews
+        env:
+        - name: LOG_DIR
+          value: "/tmp/logs"
+        ports:
+        - port: 9080
+          targetPort: 9080
+          containerPort: 9080
+        volume_mounts:
+        - name: tmp
+          mount_path: /tmp
+        - name: wlp-output
+          mount_path: /opt/ibm/wlp/output
+      requirements:
+      - host: 
+          node_filter:
+            $and:
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, num-cpus ]
+                  - 1
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, mem-size ]
+                  - 2
+
+    ###########################################################################
+    # Productpage (deployment productpage-v1 + service productpage)
+    ###########################################################################
+    productpage_v1:
+      type: swch:Microservice
+      properties:
+        image: docker.io/istio/examples-bookinfo-productpage-v1:1.20.3
+        replicas: 1
+        labels:
+          app: productpage
+          version: v1
+          service: productpage
+        annotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "9080"
+          prometheus.io/path: "/metrics"
+        service_account: bookinfo-productpage
+        ports:
+        - port: 9080
+          targetPort: 9080
+          containerPort: 9080
+        volume_mounts:
+        - name: tmp
+          mount_path: /tmp
+      requirements:
+      - host:
+          count: 1
+          node_filter:
+            $and:
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, num-cpus ]
+                  - 1
+              - $greater_or_equal:
+                  - $get_property: [ SELF, TARGET, CAPABILITY, host, mem-size ]
+                  - 2
+
+  policies:
+  - frontend_colocation:
+      type: swch:Scheduling.Colocation
+      targets: [ details_v1, productpage_v1 ]
+
+  - reviews_colocation:
+      type: swch:Scheduling.Colocation
+      targets: [ reviews_v1, reviews_v2, reviews_v3 ]

@@ -1,0 +1,51 @@
+services:
+  hub-ra:
+    build: .
+    container_name: hub-ra
+    command: ["tests/integration/configs/hub-ra-config.yaml", "tests/integration/configs/hub-capacity.yaml"]
+    volumes:
+      - ./tests:/app/tests:ro
+    networks:
+      - ra-test-net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('localhost', 5000), timeout=2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  worker-ra:
+    build: .
+    container_name: worker-ra
+    command: ["tests/integration/configs/worker-ra-config.yaml", "tests/integration/configs/worker-capacity.yaml"]
+    volumes:
+      - ./tests:/app/tests:ro
+    depends_on:
+      hub-ra:
+        condition: service_healthy
+    networks:
+      - ra-test-net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('localhost', 5000), timeout=2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  test-runner:
+    build: .
+    container_name: test-runner
+    entrypoint: ["python", "/app/tests/integration/test_ra_integration.py"]
+    volumes:
+      - ./tests:/app/tests:ro
+    depends_on:
+      hub-ra:
+        condition: service_healthy
+      worker-ra:
+        condition: service_healthy
+    networks:
+      - ra-test-net
+
+networks:
+  ra-test-net:
+    driver: bridge
