@@ -1,0 +1,12 @@
+request_type: "submit"   # submit | delete | query
+
+job_id: ""         # required for delete or query
+
+tosca_path: "tests/integration/configs/test-app.yaml"   # required only for submit
+
+
+hub_host: "hub-ra"
+#hub_host: "127.0.0.1"
+hub_port: 5000
+gw_RA_id: "Hub-RA"
+
