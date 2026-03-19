@@ -15,9 +15,9 @@ class KBClient:
 
     Supported data types:
     - SAT (Swarmchestrate Application Template)
-    - CB_STATE (ClusterBuilder State file)
     - CAPLIB_STATE (Capacity Lib State file)
-    - CDT_STATE (Capacity Description Template)
+    - CDT (Capacity Description Template)
+    - CB_STATE (ClusterBuilder's OpenTofu State file) (not implemented yet)
 
     All methods return a dictionary with 'success' status and additional information.
     """
@@ -34,7 +34,6 @@ class KBClient:
     def _upload_to_KB(id: str, data: Dict[str, Any], prefix: str, format="yaml") -> Dict[str, Any]:
         cfg = KBClient._KB_base_config()
         upload_url = f"{cfg['base']}/optimusdb1/{cfg['context']}/upload"
-        command_url = f"{cfg['base']}/optimusdb1/{cfg['context']}/command"
         filename = f"{prefix}-{id}"
 
         try:
@@ -181,12 +180,12 @@ class KBClient:
 
     1) Swarmchestrate Application Template (SAT): SAT_<SWARMID>
         Exptected format=yaml
-    2) ClusterBuilder (CB) -> OpenTofu state file: CB_STATE_<SWARMID>
+    2) Capacity Lib State file: -> CAPLIB_STATE_<RAID>
+        Exptected format=yaml
+    3) Capacity Description Template (CDT): CDT_<RAID>
+        Exptected format=yaml
+    4) ClusterBuilder (CB) -> OpenTofu state file: CB_STATE_<SWARMID> (NOT IMPLEMENTED YET)
         Exptected format=json
-    3) Capacity Lib State file: -> CAPLIB_STATE_<RAID>
-        Exptected format=yaml
-    4) Capacity Description Template (CDT): CDT_<RAID>
-        Exptected format=yaml
     '''
 
     @staticmethod
