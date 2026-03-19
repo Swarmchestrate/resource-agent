@@ -983,6 +983,19 @@ class ResourceAgent:
             # 2. k3s cluster
             # Ze-done; make sure them can be correctly loaded on all clouds (sztaki, edge, aws_us)
 
+            # Get the offer info of the resource(s) to deploy
+            lead_resource_offer = {lead_resource_name: offer_info[lead_resource_name]}
+
+            # Get a Sardou object of the CDT
+            cdt = Sardou(self.capacity_file)
+
+            # Generate the RDT based on the resource offer info
+            rdt = cdt.generate_rdt(lead_resource_offer)
+
+            # Get the cluster info 
+            # FIXME: Currently get_cluster() is not working
+            cluster_info = Sardou(content=rdt).get_cluster()
+
             ports = json.dumps([
                 {
                     "from": 0,
