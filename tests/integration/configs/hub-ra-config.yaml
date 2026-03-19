@@ -1,0 +1,12 @@
+RA_id: "Hub-RA"
+universe_id: "test_universe"
+api_port: 5000
+p2p_port: 5000
+ssh_user: ""
+ssh_key_path: ""
+aws_ami: ""
+openstack_image_id: ""
+openstack_network_id: ""
+edge_device_ip: ""
+hub_ra_ip: ""
+bootstrap_peers: []
