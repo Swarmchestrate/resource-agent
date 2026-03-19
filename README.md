@@ -19,6 +19,7 @@ Step 2: Perform Distributed Resource Discovery
 
 - Broadcast resource requirements to all participating RAs.
 - Each RA evaluates local resource availability and sends the results back to the main RA.
+- Capacity status update accordingly.
 
 ---
 
@@ -49,12 +50,6 @@ Step 4: Provision Swarm Cluster
 Step 1: Validates and processes application
 - Submits the Application Deployment Template (ADT) to the Knowledge Base (KB).
 - Extracts Monitoring metrics resource requirements, QoS requirements for offer generation and ranking.
-
----
-
-Step 2: Perform Distributed Resource Discovery
-
-- Dynamically update RAs' capacity usage.
   
 ---
 
