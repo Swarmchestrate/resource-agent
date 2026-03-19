@@ -65,18 +65,7 @@ class ResourceAgent:
         self.config_file = config_file
         self.capacity_file = capacity_file
         self.config = self._load_config(config_file)
-        # cap-lib-Done: replace capacity registeration
-        print(f"[DEBUG] Initializing capacity registry for RA {self.config.get('RA_id')}")  
-        self.capreg = SwChCapacityRegistry(self.config.get('RA_id'))
-        with open(self.capacity_file) as stream:
-            try:
-                capacity_content = stream.read()
-            except yaml.YAMLError as exc:
-                print(exc)
-        self.capreg.initialize_capacity_by_content(capacity_content)
-        
-        self.capacity = self._load_config(capacity_file) if capacity_file else {}
-        
+
         self.job_tosca = {} # store the tosca of each job [job_id]
         self.job_states = {} # store the state of each job [job_id]{state: xxx}
         self.job_responses = {} # store the resource responses from RAs for each job [job_id][ra_id]
@@ -97,6 +86,42 @@ class ResourceAgent:
         self.credentials = self.config.get('credentials', {})
         self.hub_ra_ip = self.config.get('hub_ra_ip', '')
 
+        # Loads capacity
+        # cap-lib-Done: replace capacity registeration
+        print(f"[DEBUG] Initializing capacity registry for RA {self.config.get('RA_id')}")  
+        self.capreg = SwChCapacityRegistry(self.config.get('RA_id'))
+        with open(self.capacity_file) as stream:
+            try:
+                capacity_content = stream.read()
+            except yaml.YAMLError as exc:
+                print(exc)
+        self.capreg.initialize_capacity_by_content(capacity_content)
+        
+        self.capacity = self._load_config(capacity_file) if capacity_file else {}
+
+        # KB-TODO: this is a test for uploading CDT, note that yaml dictionary format is required for uploading to KB.
+    ########
+    # CDT
+    ########
+
+        parsed_capacity = yaml.safe_load(capacity_content)
+        upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
+        if upload["success"]:
+        # Should be a info log
+            print(f"{upload['filename']} uploaded successfuly to KB")
+        else:
+        # Should be an error log
+            print(f"Upload to KB failed: {upload['error']}")
+
+        download = KBClient.download_CDT_from_KB(self.ra_id)
+        if download["success"]:
+        # Should be an info log
+            print(f"{download['filename']} downloaded successfuly from KB")
+            print(download["data"])
+        else:
+        # Should be an error log
+            print(f"Download from KB failed: {download['error']}")
+ 
         # Extract cluster-builder required values
         # Ze-TODO: these values may not be needed anymore, tosca.get_cluster() function should return these values, but it is not implemented yet
         # Ze-TODO: Maybe these should be defined in the capacity file instead of config file
@@ -107,7 +132,6 @@ class ResourceAgent:
         self.openstack_network_id = self.config.get('openstack_network_id', '')
         self.edge_device_ip = self.config.get('edge_device_ip', '')
 
-        # print(f"[DEBUG]SSH user is {self.ssh_user}")
         # Initialize P2P communication
         self.peer = None
         self.is_running = False
@@ -267,14 +291,15 @@ class ResourceAgent:
         """Handle job submission from client - Hub RA only"""
         self.logger.info(f"Received application submission from {peer_id}")
 
-        # TODO: as soon as job is received, job id should be created
+        # DONE: as soon as job is received, job id should be created
         client_id = message.get('client_id')
-        job_id = (datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_"+ client_id)
+        job_id = (self.ra_id + "_" + datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3])
         self.job_states[job_id] = {}
         self._update_job_state(job_id, "Pending")
         self.job_clients[job_id] = message.get('client_id')
 
 
+        # TODO: the client does not receive ID 
         if client_id:
             print("Sending SWARM ID response to client:", self.job_clients[job_id])
             submit_response_message = {
@@ -296,6 +321,10 @@ class ResourceAgent:
             self.tosca[job_id] = Sardou('tosca.yaml') #(to validate, may fail if invalid)
             print(f"✅ Successfully validated submitted application tosca for job {job_id}")
             
+            save_path = f"./KB/tosca_{job_id}.yaml"
+            with open(save_path, 'w') as f:
+                yaml.dump(self.job_tosca[job_id], f)
+            print(f"✅ !!!!! Successfully saved TOSCA file for job {job_id} at {save_path}")
             ask_yaml = self.tosca[job_id].get_requirements()
             self._update_job_state(job_id, "Initialising")
             client_id = message.get('client_id')
@@ -316,6 +345,7 @@ class ResourceAgent:
                     "job_id": job_id,
                     "client_id": client_id,
                     # cap-lib-TODO: replace requirements with tosca
+		    # KB-TODO: maybe not required as one could download the tosca from KB. 
                     "ask_yaml" : self.job_tosca[job_id], #"tosca.yaml", #/ rm ask_yaml = self.tosca[job_id].get_requirements()
                     #"ask_yaml": ask_yaml,
                     "timestamp": message.get('timestamp'),
@@ -330,10 +360,10 @@ class ResourceAgent:
                     self.logger.info(f"Broadcasted application to {ra_id}")
                         # TODO: at here create a folder to store TOSCA
 
-                save_path = f"./KB/tosca_{job_id}.yaml"
-                with open(save_path, 'w') as f:
-                    yaml.dump(self.job_tosca[job_id], f)
-                print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
+                #save_path = f"./KB/tosca_{job_id}.yaml"
+                #with open(save_path, 'w') as f:
+                #    yaml.dump(self.job_tosca[job_id], f)
+                #print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
 
                 # Process locally as well
                 self._process_job_requirements(job_id, client_id, save_path, self.peer.peer_id)            
@@ -507,20 +537,31 @@ class ResourceAgent:
         # This correctly handles: job_offers[job_id][ms_id][offer_id]['ids']['ra_id']
         self.lead_resource[job_id] = next(
             (ms_id for ms_id, offers in self.job_offers[job_id].items() 
-            if any(data.get('ids', {}).get('ra_id') == 'ra-aws-cloud-us' for data in offers.values())), 
+            if any(data.get('ids', {}).get('ra_id') == 'Hub-RA' for data in offers.values())), 
             #if any(data.get('ids', {}).get('ra_id') == 'ra-sztaki-cloud-hu' for data in offers.values())), 
             None
         )
+
+        # Ze-TODO: this is a test for print the output of rdt(cdt, offer)
         print(f"[DEBUG] lead_resource for job {job_id} is {self.lead_resource[job_id]}")
         # 3. Safely extract the details from the chosen Lead Resource
         selected_ms = self.lead_resource[job_id]
+        print(f"[DEBUG] selected ms is {selected_ms}")
+        print(f"[DEBUG] offer for the selected ms is {self.job_offers[job_id][selected_ms]}")
+        
+        cdt = Sardou(self.capacity_file)
+
+            # Generate the RDT based on the resource offer info
+        rdt = cdt.generate_rdt(self.job_offers[job_id][selected_ms])
+        print(f"!!!!!! [DEBUG] rdt is {rdt}")
+
         if selected_ms:
             # Get the keys and ensure there is at least one offer
             offer_keys = list(self.job_offers[job_id][selected_ms].keys())
             if not offer_keys:
                 print(f"[ERROR] Microservice {selected_ms} has no offers!")
                 return
-                
+               
             offer_id = offer_keys[0]
             offer_data = self.job_offers[job_id][selected_ms][offer_id]
             
@@ -968,8 +1009,19 @@ class ResourceAgent:
         #cloud = "openstack"
         #instance_type = "m2.small"
         #print(f"instance is {instance}")
+
+        # FIXME
         offer_info = message.get('offer_info', {})
         #print(f"offer_info received by LR is {offer_info}")
+            # Get the offer info of the resource(s) to deploy
+        lead_resource_offer = {lead_resource_name: offer_info[lead_resource_name]}
+
+            # Get a Sardou object of the CDT
+        cdt = Sardou(self.capacity_file)
+
+            # Generate the RDT based on the resource offer info
+        rdt = cdt.generate_rdt(lead_resource_offer)
+        print(f"!!!!!! [DEBUG] rdt is {rdt}")
 
         print("Press a key to continue:")
 
@@ -991,6 +1043,7 @@ class ResourceAgent:
 
             # Generate the RDT based on the resource offer info
             rdt = cdt.generate_rdt(lead_resource_offer)
+            print(f"!!!!!! [DEBUG] rdt is {rdt}")
 
             # Get the cluster info 
             # FIXME: Currently get_cluster() is not working
