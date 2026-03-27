@@ -98,6 +98,10 @@ class ResourceAgent:
         self.capreg.initialize_capacity_by_content(capacity_content)
         
         self.capacity = self._load_config(capacity_file) if capacity_file else {}
+        print(f"[DEBUG] Loaded capacity for RA {self.config.get('RA_id')}: {self.capacity}")
+        print(f"[DEBUG] Capacity registry info for RA {self.config.get('RA_id')}:")
+        for key, value in self.capreg.get_capacity_info().items():
+            print(f"[DEBUG]   {key}: {value}")
 
         # KB-TODO: this is a test for uploading CDT, note that yaml dictionary format is required for uploading to KB.
     ########
@@ -105,20 +109,16 @@ class ResourceAgent:
     ########
         download = KBClient.download_CDT_from_KB(self.ra_id)
         if download["success"]:
-        # Should be an info log
-            print(f"{download['filename']} downloaded successfuly from KB")
-            print(download["data"])
+            self.logger.info(f"RA{self.ra_id}: {download['filename']} downloaded successfuly from KB")
+            self.logger.info(f"RA{self.ra_id}: {download['data']}")
         else:
-        # Should be an error log
-            print(f"Download from KB failed: {download['error']}, the CDT file may not exist in KB, try uploading it first")
+            self.logger.error(f"RA{self.ra_id}: Download from KB failed: {download['error']}, the CDT file may not exist in KB, try uploading it first")
             parsed_capacity = yaml.safe_load(capacity_content)
             upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
             if upload["success"]:
-            # Should be a info log
-                print(f"{upload['filename']} uploaded successfuly to KB")
+                self.logger.info(f"RA{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
             else:
-            # Should be an error log
-                print(f"Upload to KB failed: {upload['error']}")
+                self.logger.error(f"RA{self.ra_id}: Upload to KB failed: {upload['error']}")
 
         # Extract cluster-builder required values
         # Ze-TODO: these values may not be needed anymore, tosca.get_cluster() function should return these values, but it is not implemented yet
@@ -363,8 +363,8 @@ class ResourceAgent:
                 broadcast_message = {
                     "job_id": job_id,
                     "client_id": client_id,
-                    # cap-lib-TODO: replace requirements with tosca
-		    # KB-TODO: maybe not required as one could download the tosca from KB. 
+                    # cap-lib-done: replace requirements with tosca
+		            # KB-done: maybe not required as one could download the tosca from KB. 
                     #"ask_yaml" : self.job_tosca[job_id], #"tosca.yaml", #/ rm ask_yaml = self.tosca[job_id].get_requirements()
                     #"ask_yaml": ask_yaml,
                     "timestamp": message.get('timestamp'),
@@ -443,11 +443,12 @@ class ResourceAgent:
         ask_yaml = KBClient.download_SAT_from_KB(job_id)
         if ask_yaml:
             # Should be an info log
-            print(f"RA{self.ra_id}: {ask_yaml['filename']} downloaded successfuly from KB")
+            self.logger.info(f"RA{self.ra_id}: {ask_yaml['filename']} downloaded successfuly from KB")
+            #print(f"RA{self.ra_id}: {ask_yaml['filename']} downloaded successfuly from KB")
             print(ask_yaml["data"])
         else:
             # Should be an error log
-            print(f"RA{self.ra_id}: Download from KB failed: {ask_yaml['error']}")
+            self.logger.error(f"RA{self.ra_id}: Download from KB failed: {ask_yaml['error']}")
 
         hub_ra = message.get('hub_ra')
         all_ras = self.peer.find_peers({"peer_type": "RA"})
