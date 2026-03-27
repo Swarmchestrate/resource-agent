@@ -319,9 +319,29 @@ class ResourceAgent:
             self.tosca[job_id] = Sardou('tosca.yaml') #(to validate, may fail if invalid)
             print(f"✅ Successfully validated submitted application tosca for job {job_id}")
             
+            
             save_path = f"./KB/tosca_{job_id}.yaml"
+            # KB-TODO: save the tosca file to local first, then upload to KB, in the future, we can directly upload the tosca content to KB without saving a local file
             with open(save_path, 'w') as f:
                 yaml.dump(self.job_tosca[job_id], f)
+            upload = KBClient.upload_SAT_to_KB(job_id, self.job_tosca[job_id])
+            if upload["success"]:
+                # Should be a info log
+                print(f"{upload['filename']} uploaded successfuly to KB")
+            else:
+                # Should be an error log
+                print(f"Upload to KB failed: {upload['error']}")
+
+            download = KBClient.download_SAT_from_KB(job_id)
+            if download["success"]:
+                # Should be an info log
+                print(f"{download['filename']} downloaded successfuly from KB")
+                print(download["data"])
+            else:
+                # Should be an error log
+                print(f"Download from KB failed: {download['error']}")
+
+
             print(f"✅ !!!!! Successfully saved TOSCA file for job {job_id} at {save_path}")
             ask_yaml = self.tosca[job_id].get_requirements()
             self._update_job_state(job_id, "Initialising")
