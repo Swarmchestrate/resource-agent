@@ -103,16 +103,6 @@ class ResourceAgent:
     ########
     # CDT
     ########
-
-        parsed_capacity = yaml.safe_load(capacity_content)
-        upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
-        if upload["success"]:
-        # Should be a info log
-            print(f"{upload['filename']} uploaded successfuly to KB")
-        else:
-        # Should be an error log
-            print(f"Upload to KB failed: {upload['error']}")
-
         download = KBClient.download_CDT_from_KB(self.ra_id)
         if download["success"]:
         # Should be an info log
@@ -120,8 +110,16 @@ class ResourceAgent:
             print(download["data"])
         else:
         # Should be an error log
-            print(f"Download from KB failed: {download['error']}")
- 
+            print(f"Download from KB failed: {download['error']}, the CDT file may not exist in KB, try uploading it first")
+            parsed_capacity = yaml.safe_load(capacity_content)
+            upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
+            if upload["success"]:
+            # Should be a info log
+                print(f"{upload['filename']} uploaded successfuly to KB")
+            else:
+            # Should be an error log
+                print(f"Upload to KB failed: {upload['error']}")
+
         # Extract cluster-builder required values
         # Ze-TODO: these values may not be needed anymore, tosca.get_cluster() function should return these values, but it is not implemented yet
         # Ze-TODO: Maybe these should be defined in the capacity file instead of config file
