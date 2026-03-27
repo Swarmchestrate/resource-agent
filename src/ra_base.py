@@ -365,7 +365,7 @@ class ResourceAgent:
                     "client_id": client_id,
                     # cap-lib-TODO: replace requirements with tosca
 		    # KB-TODO: maybe not required as one could download the tosca from KB. 
-                    "ask_yaml" : self.job_tosca[job_id], #"tosca.yaml", #/ rm ask_yaml = self.tosca[job_id].get_requirements()
+                    #"ask_yaml" : self.job_tosca[job_id], #"tosca.yaml", #/ rm ask_yaml = self.tosca[job_id].get_requirements()
                     #"ask_yaml": ask_yaml,
                     "timestamp": message.get('timestamp'),
                     "hub_ra": self.peer.peer_id
@@ -439,11 +439,7 @@ class ResourceAgent:
 
         job_id = message.get('job_id')
         client_id = message.get('client_id')
-        #ask_yaml = message.get('ask_yaml')
-        #save_path = f"./KB/tosca_{job_id}.yaml"
-        #with open(save_path, 'w') as f:
-        #    yaml.dump(ask_yaml, f)
-        
+    
         ask_yaml = KBClient.download_SAT_from_KB(job_id)
         if ask_yaml:
             # Should be an info log
@@ -457,9 +453,6 @@ class ResourceAgent:
         all_ras = self.peer.find_peers({"peer_type": "RA"})
 
         save_path = f"./KB/tosca_{job_id}.yaml"
-        #with open(save_path, 'w') as f:
-        #    yaml.dump(ask_yaml, f)
-        
         with open(save_path, 'w') as f:
             yaml.safe_dump(ask_yaml["data"], f)
         print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
