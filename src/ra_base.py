@@ -324,6 +324,8 @@ class ResourceAgent:
             # KB-TODO: save the tosca file to local first, then upload to KB, in the future, we can directly upload the tosca content to KB without saving a local file
             with open(save_path, 'w') as f:
                 yaml.dump(self.job_tosca[job_id], f)
+
+            print(f"✅ !!!!! Successfully saved TOSCA file for job {job_id} at {save_path}")
             upload = KBClient.upload_SAT_to_KB(job_id, self.job_tosca[job_id])
             if upload["success"]:
                 # Should be a info log
@@ -342,7 +344,6 @@ class ResourceAgent:
                 print(f"Download from KB failed: {download['error']}")
 
 
-            print(f"✅ !!!!! Successfully saved TOSCA file for job {job_id} at {save_path}")
             ask_yaml = self.tosca[job_id].get_requirements()
             self._update_job_state(job_id, "Initialising")
             client_id = message.get('client_id')
@@ -442,6 +443,16 @@ class ResourceAgent:
         save_path = f"./KB/tosca_{job_id}.yaml"
         with open(save_path, 'w') as f:
             yaml.dump(ask_yaml, f)
+        
+        download = KBClient.download_SAT_from_KB(job_id)
+        if download["success"]:
+            # Should be an info log
+            print(f"RA{self.ra_id}: {download['filename']} downloaded successfuly from KB")
+            print(download["data"])
+        else:
+            # Should be an error log
+            print(f"RA{self.ra_id}: Download from KB failed: {download['error']}")
+
         print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
         hub_ra = message.get('hub_ra')
         all_ras = self.peer.find_peers({"peer_type": "RA"})
