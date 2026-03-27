@@ -457,8 +457,11 @@ class ResourceAgent:
         all_ras = self.peer.find_peers({"peer_type": "RA"})
 
         save_path = f"./KB/tosca_{job_id}.yaml"
+        #with open(save_path, 'w') as f:
+        #    yaml.dump(ask_yaml, f)
+        
         with open(save_path, 'w') as f:
-            yaml.dump(ask_yaml, f)
+            yaml.safe_dump(ask_yaml["data"], f)
         print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
         
         # Process job requirements
