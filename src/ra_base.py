@@ -586,6 +586,8 @@ class ResourceAgent:
             # Generate the RDT based on the resource offer info
         rdt = cdt.generate_rdt(self.job_offers[job_id][selected_ms])
         print(f"!!!!!! [DEBUG] rdt is {rdt}")
+        cluster_info = Sardou(content=rdt).get_cluster()
+        print(f"cluster_info is {cluster_info}")
 
         if selected_ms:
             # Get the keys and ensure there is at least one offer
@@ -1054,7 +1056,8 @@ class ResourceAgent:
             # Generate the RDT based on the resource offer info
         rdt = cdt.generate_rdt(lead_resource_offer)
         print(f"!!!!!! [DEBUG] rdt is {rdt}")
-
+        cluster_info = Sardou(content=rdt).get_cluster()
+        print(f"cluster_info is {cluster_info}")
         print("Press a key to continue:")
 
 
