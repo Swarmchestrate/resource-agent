@@ -439,24 +439,28 @@ class ResourceAgent:
 
         job_id = message.get('job_id')
         client_id = message.get('client_id')
-        ask_yaml = message.get('ask_yaml')
-        save_path = f"./KB/tosca_{job_id}.yaml"
-        with open(save_path, 'w') as f:
-            yaml.dump(ask_yaml, f)
+        #ask_yaml = message.get('ask_yaml')
+        #save_path = f"./KB/tosca_{job_id}.yaml"
+        #with open(save_path, 'w') as f:
+        #    yaml.dump(ask_yaml, f)
         
-        download = KBClient.download_SAT_from_KB(job_id)
-        if download["success"]:
+        ask_yaml = KBClient.download_SAT_from_KB(job_id)
+        if ask_yaml:
             # Should be an info log
-            print(f"RA{self.ra_id}: {download['filename']} downloaded successfuly from KB")
-            print(download["data"])
+            print(f"RA{self.ra_id}: {ask_yaml['filename']} downloaded successfuly from KB")
+            print(ask_yaml["data"])
         else:
             # Should be an error log
-            print(f"RA{self.ra_id}: Download from KB failed: {download['error']}")
+            print(f"RA{self.ra_id}: Download from KB failed: {ask_yaml['error']}")
 
-        print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
         hub_ra = message.get('hub_ra')
         all_ras = self.peer.find_peers({"peer_type": "RA"})
 
+        save_path = f"./KB/tosca_{job_id}.yaml"
+        with open(save_path, 'w') as f:
+            yaml.dump(ask_yaml, f)
+        print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
+        
         # Process job requirements
         self._process_job_requirements(job_id, client_id, save_path, hub_ra)
 
