@@ -66,6 +66,10 @@ class ResourceAgent:
         self.capacity_file = capacity_file
         self.config = self._load_config(config_file)
 
+        # Setup logging
+        self._setup_logging()
+        load_dotenv()
+
         self.job_tosca = {} # store the tosca of each job [job_id]
         self.job_states = {} # store the state of each job [job_id]{state: xxx}
         self.job_responses = {} # store the resource responses from RAs for each job [job_id][ra_id]
@@ -134,9 +138,6 @@ class ResourceAgent:
         self.peer = None
         self.is_running = False
 
-        # Setup logging
-        self._setup_logging()
-        load_dotenv()
 
     def _load_config(self, config_file: str) -> Dict[str, Any]:
         """Load configuration from YAML file"""
