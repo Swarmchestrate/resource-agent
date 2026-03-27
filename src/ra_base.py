@@ -99,9 +99,9 @@ class ResourceAgent:
         
         self.capacity = self._load_config(capacity_file) if capacity_file else {}
         print(f"[DEBUG] Loaded capacity for RA {self.config.get('RA_id')}: {self.capacity}")
-        print(f"[DEBUG] Capacity registry info for RA {self.config.get('RA_id')}:")
-        for key, value in self.capreg.get_capacity_info().items():
-            print(f"[DEBUG]   {key}: {value}")
+        #print(f"[DEBUG] Capacity registry info for RA {self.config.get('RA_id')}:")
+        #for key, value in self.capreg.get_capacity_info().items():
+        #    print(f"[DEBUG]   {key}: {value}")
 
         # KB-TODO: this is a test for uploading CDT, note that yaml dictionary format is required for uploading to KB.
     ########
