@@ -40,9 +40,9 @@ httpx==0.27.0
 #msgpack==1.0.7
 
 # Tosca library
-Sardou==0.10.1
+Sardou>=0.12.1
 #Sardou==0.4.2
 
 # cap_lib
-swchcapreg==0.1.2
+swchcapreg==0.2.0
 
