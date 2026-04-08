@@ -1098,13 +1098,25 @@ class ResourceAgent:
             print(f"!!!!!! [DEBUG] cluster_info is {cluster_info}")
             
             node_info = next(iter(cluster_info.values()), {})
-            edge_device_ip = node_info.get("edge_device_ip", "")
+            
+            # general
+            # TODO: ssh_key_path should be a property defined in cdt, for now, some are missing, and naming is not consistent.
             ssh_key_path = node_info.get("ssh_key", "")
-            ssh_user = node_info.get("ssh_user", "")
+            ssh_user = node_info.get("ssh_user", "ubuntu")
+
+            # edge
             ssh_auth_method = node_info.get("ssh_auth_method", "")
+            edge_device_ip = node_info.get("edge_device_ip", "")
             ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
-            instance_type = node_info.get("instance_type", "")
+
+            # aws
+            aws_instance_type = node_info.get("instance_type", "")
             aws_ami = node_info.get("ami", "")
+
+            # sztaki openstack
+            openstack_image_id = node_info.get("image_id", "")
+            openstack_network_id = node_info.get("openstack_network_id", "")
+            openstack_flavor_name = node_info.get("flavor_name", "")
 
             print(f"ssh_user is {ssh_user}, ssh_key_path is {ssh_key_path}")
 
@@ -1125,7 +1137,7 @@ class ResourceAgent:
             # For future automation, we need to make sure each RA has the required ssh key pair, security group, ami, etc for each provider.
             master_node_aws = (
                 f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
-                f'"instance_type": "{instance_type}",'
+                f'"instance_type": "{aws_instance_type}",'
                 f'"ha": false,'
                 f'"cluster_name": "{job_id}",'
                 f'"ami": "{aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
@@ -1140,18 +1152,18 @@ class ResourceAgent:
 
             master_node_openstack = (
                 f'{{"cloud": "{cloud}",'
-                f'"openstack_flavor_id": "{instance_type}",'
+                f'"openstack_flavor_id": "{openstack_flavor_name}",'
                 f'"ha": false,'
-                f'"openstack_image_id": "{self.openstack_image_id}",'
+                f'"openstack_image_id": "{openstack_image_id}",'
                 f'"security_group_id": "",'
                 f'"volume_size": "10",'
                 #f'"floating_ip_pool": "ext-net",'
-                f'"network_id": "{self.openstack_network_id}",'
+                f'"network_id": "{openstack_network_id}",'
                 f'"cluster_name": "{job_id}",'
                 f'"resource_name":"{node_name}",'    
-                f'"ssh_user": "{self.ssh_user}",'
+                f'"ssh_user": "{ssh_user}",'
                 #f'"ssh_key_name": "",'
-                f'"ssh_key": "{self.ssh_key_path}",'
+                f'"ssh_key": "{ssh_key_path}",'
                 f'"use_block_device": true,'
                 f'"k3s_role": "{k3s_role}"}}'
             )
