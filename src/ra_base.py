@@ -1103,7 +1103,7 @@ class ResourceAgent:
             ssh_user = node_info.get("ssh_user", "")
             ssh_auth_method = node_info.get("ssh_auth_method", "")
             ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
-            instance_type = node_info.get("instance_type". "")
+            instance_type = node_info.get("instance_type", "")
             aws_ami = node_info.get("ami", "")
 
             print(f"ssh_user is {ssh_user}, ssh_key_path is {ssh_key_path}")
