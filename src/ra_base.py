@@ -569,25 +569,29 @@ class ResourceAgent:
         # This correctly handles: job_offers[job_id][ms_id][offer_id]['ids']['ra_id']
         self.lead_resource[job_id] = next(
             (ms_id for ms_id, offers in self.job_offers[job_id].items() 
-            if any(data.get('ids', {}).get('ra_id') == 'Hub-RA' for data in offers.values())), 
+            if any(data.get('ids', {}).get('ra_id') == 'ra-aws-cloud-us' for data in offers.values())), 
+            #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-edge-uk' for data in offers.values())), 
             #if any(data.get('ids', {}).get('ra_id') == 'ra-sztaki-cloud-hu' for data in offers.values())), 
             None
         )
 
         # Ze-TODO: this is a test for print the output of rdt(cdt, offer)
-        print(f"[DEBUG] lead_resource for job {job_id} is {self.lead_resource[job_id]}")
+
+        #print(f"[DEBUG] lead_resource for job {job_id} is {self.lead_resource[job_id]}")
         # 3. Safely extract the details from the chosen Lead Resource
         selected_ms = self.lead_resource[job_id]
         print(f"[DEBUG] selected ms is {selected_ms}")
-        print(f"[DEBUG] offer for the selected ms is {self.job_offers[job_id][selected_ms]}")
-        
-        cdt = Sardou(self.capacity_file)
-
+        #print(f"[DEBUG] offer for the selected ms is {self.job_offers[job_id][selected_ms]}")
+        #print(f"capacity_file {self.capacity_file}") 
+        #cdt = Sardou(self.capacity_file)
+        # the offer has to contain the name of resource key
+        #offer = {selected_ms: self.job_offers[job_id][selected_ms]}
+        #print(f"offer is {offer}")
             # Generate the RDT based on the resource offer info
-        rdt = cdt.generate_rdt(self.job_offers[job_id][selected_ms])
-        print(f"!!!!!! [DEBUG] rdt is {rdt}")
-        cluster_info = Sardou(content=rdt).get_cluster()
-        print(f"cluster_info is {cluster_info}")
+        #rdt = cdt.generate_rdt(offer, output_path="edge-rdt.yaml")
+        #print(f"!!!!!! [DEBUG] rdt is {rdt}")
+        #cluster_info = Sardou(content=rdt).get_cluster()
+        #print(f"cluster_info is {cluster_info}")
 
         if selected_ms:
             # Get the keys and ensure there is at least one offer
@@ -1051,13 +1055,13 @@ class ResourceAgent:
         lead_resource_offer = {lead_resource_name: offer_info[lead_resource_name]}
 
             # Get a Sardou object of the CDT
-        cdt = Sardou(self.capacity_file)
+        #cdt = Sardou(self.capacity_file)
 
             # Generate the RDT based on the resource offer info
-        rdt = cdt.generate_rdt(lead_resource_offer)
-        print(f"!!!!!! [DEBUG] rdt is {rdt}")
-        cluster_info = Sardou(content=rdt).get_cluster()
-        print(f"cluster_info is {cluster_info}")
+        #rdt = cdt.generate_rdt(lead_resource_offer)
+        #print(f"!!!!!! [DEBUG] rdt is {rdt}")
+        #cluster_info = Sardou(content=rdt).get_cluster()
+        #print(f"cluster_info is {cluster_info}")
         print("Press a key to continue:")
 
 
@@ -1083,7 +1087,15 @@ class ResourceAgent:
             # Get the cluster info 
             # FIXME: Currently get_cluster() is not working
             cluster_info = Sardou(content=rdt).get_cluster()
-
+            print(f"!!!!!! [DEBUG] cluster_info is {cluster_info}")
+            
+            node_info = next(iter(cluster_info.values()), {})
+            edge_device_ip = node_info.get("edge_device_ip", "")
+            ssh_key_path = node_info.get("ssh_key", "")
+            ssh_user = node_info.get("ssh_user", "")
+            ssh_auth_method = node_info.get("ssh_auth_method", "")
+            ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
+            print(f"ssh_user is {ssh_user}, ssh_key_path is {ssh_key_path}")
             ports = json.dumps([
                 {
                     "from": 0,
@@ -1133,12 +1145,12 @@ class ResourceAgent:
             )
             master_node_edge = (
                 f'{{"cloud": "{cloud}",'
-                f'"edge_device_ip": "{self.edge_device_ip}",'
+                f'"edge_device_ip": "{edge_device_ip}",'
                 f'"ha": false,'
                 f'"cluster_name": "{job_id}",'
                 f'"resource_name":"{node_name}",'
-                f'"ssh_user": "{self.ssh_user}",'
-                f'"ssh_key": "{self.ssh_key_path}",'
+                f'"ssh_user": "{ssh_user}",'
+                f'"ssh_key": "{ssh_key_path}",'
                 f'"ssh_auth_method": "key",'
                 f'"k3s_role": "{k3s_role}"}}'
             )
