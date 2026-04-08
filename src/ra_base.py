@@ -1096,6 +1096,14 @@ class ResourceAgent:
             ssh_auth_method = node_info.get("ssh_auth_method", "")
             ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
             print(f"ssh_user is {ssh_user}, ssh_key_path is {ssh_key_path}")
+
+            import re
+
+            def sanitize_node_name(name: str) -> str:
+                name = name.lower()
+                name = re.sub(r"[^a-z0-9-]+", "-", name)
+                name = re.sub(r"-+", "-", name).strip("-")
+                return name[:63]
             ports = json.dumps([
                 {
                     "from": 0,
@@ -1110,6 +1118,7 @@ class ResourceAgent:
                     "source": "10.0.0.0/16"
                 }
             ])
+            job_id=sanitize_node_name(job_id)
             # For future automation, we need to make sure each RA has the required ssh key pair, security group, ami, etc for each provider.
             master_node_aws = (
                 f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
