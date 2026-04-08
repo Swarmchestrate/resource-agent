@@ -294,6 +294,14 @@ class ResourceAgent:
         # DONE: as soon as job is received, job id should be created
         client_id = message.get('client_id')
         job_id = (self.ra_id + "_" + datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3])
+        import re
+
+        def sanitize_node_name(name: str) -> str:
+            name = name.lower()
+            name = re.sub(r"[^a-z0-9-]+", "-", name)
+            name = re.sub(r"-+", "-", name).strip("-")
+            return name[:63]
+        job_id = sanitize_node_name(job_id)
         self.job_states[job_id] = {}
         self._update_job_state(job_id, "Pending")
         self.job_clients[job_id] = message.get('client_id')
@@ -1095,15 +1103,11 @@ class ResourceAgent:
             ssh_user = node_info.get("ssh_user", "")
             ssh_auth_method = node_info.get("ssh_auth_method", "")
             ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
+            instance_type = node_info.get("instance_type". "")
+            aws_ami = node_info.get("ami", "")
+
             print(f"ssh_user is {ssh_user}, ssh_key_path is {ssh_key_path}")
 
-            import re
-
-            def sanitize_node_name(name: str) -> str:
-                name = name.lower()
-                name = re.sub(r"[^a-z0-9-]+", "-", name)
-                name = re.sub(r"-+", "-", name).strip("-")
-                return name[:63]
             ports = json.dumps([
                 {
                     "from": 0,
@@ -1118,19 +1122,18 @@ class ResourceAgent:
                     "source": "10.0.0.0/16"
                 }
             ])
-            job_id=sanitize_node_name(job_id)
             # For future automation, we need to make sure each RA has the required ssh key pair, security group, ami, etc for each provider.
             master_node_aws = (
                 f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
                 f'"instance_type": "{instance_type}",'
                 f'"ha": false,'
                 f'"cluster_name": "{job_id}",'
-                f'"ami": "{self.aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
+                f'"ami": "{aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
                 f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
                 f'"resource_name":"{node_name}",' # Ze: to think about how to name
-                f'"ssh_user": "{self.ssh_user}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
+                f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
             #    f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
-                f'"ssh_key": "{self.ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
+                f'"ssh_key": "{ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
                 f'"k3s_role": "{k3s_role}",' # Ze: this should be default 
                 f'"custom_ingress_ports": {ports}}}'
                 )   
