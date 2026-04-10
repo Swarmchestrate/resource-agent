@@ -1088,7 +1088,7 @@ class ResourceAgent:
             print(f"offer_info received by LR is {lead_resource_offer}")
 
 
-            offer_info = self.job_offers[job_id]
+           
             for res, res_info in offer_info.items():
                 print(f"Resource: {res}")
                 print(f"Offers for resource {res}:{res_info}".format(res_info))
