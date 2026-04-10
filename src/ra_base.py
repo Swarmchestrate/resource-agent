@@ -1467,6 +1467,47 @@ class ResourceAgent:
         master_ip = self.master_info["master_ip"]
         k3s_token = self.master_info["k3s_token"]
         print(f"[DEBUG] instance_type is {instance_type}, k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
+        
+        
+        # TODO: for worker nodes, do the same as master node
+    # Get the offer info of the resource(s) to deploy
+        resource_offer = {resource_name: offer_data}
+
+        # Get a Sardou object of the CDT
+        cdt = Sardou(self.capacity_file)
+
+        # Generate the RDT based on the resource offer info
+        rdt = cdt.generate_rdt(resource_offer)
+        print(f"!!!!!! [DEBUG] rdt is {rdt}")
+
+        # Get the cluster info 
+        # FIXME: Currently get_cluster() is not working
+        cluster_info = Sardou(content=rdt).get_cluster()
+        print(f"!!!!!! [DEBUG] cluster_info is {cluster_info}")
+        
+        node_info = next(iter(cluster_info.values()), {})
+        
+        # general
+        # TODO: ssh_key_path should be a property defined in cdt, for now, some are missing, and naming is not consistent.
+        ssh_key_path = node_info.get("ssh_key", "")
+        ssh_user = node_info.get("ssh_user", "ubuntu")
+
+        # edge
+        ssh_auth_method = node_info.get("ssh_auth_method", "")
+        edge_device_ip = node_info.get("edge_device_ip", "")
+        ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
+
+        # aws
+        aws_instance_type = node_info.get("instance_type", "")
+        aws_ami = node_info.get("ami", "")
+
+        # sztaki openstack
+        openstack_image_id = node_info.get("image_id", "")
+        openstack_network_id = node_info.get("openstack_network_id", "")
+        openstack_flavor_name = node_info.get("flavor_name", "")
+
+        
+        
         for i in range(1):
         
         #for i in range(instance["resource"]["count"]):
