@@ -1085,6 +1085,8 @@ class ResourceAgent:
             # Get the offer info of the resource(s) to deploy
             lead_resource_offer = {lead_resource_name: offer_info[lead_resource_name]}
 
+            print(f"offer_info received by LR is {lead_resource_offer}")
+
             # Get a Sardou object of the CDT
             cdt = Sardou(self.capacity_file)
 
@@ -1473,6 +1475,8 @@ class ResourceAgent:
     # Get the offer info of the resource(s) to deploy
         resource_offer = {resource_name: offer_data}
 
+        print(f"offer_info received by worker node is {resource_offer}")
+        
         # Get a Sardou object of the CDT
         cdt = Sardou(self.capacity_file)
 
