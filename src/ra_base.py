@@ -1519,7 +1519,9 @@ class ResourceAgent:
         #    cloud = instance["resource"]["provider"]
             #cloud = offer_data["ids"]["provider_id"]
             cloud = offer_data["ids"]["res_type"]
-            
+            if cloud == "edge":
+                
+                print(f"[DEBUG] AWS resource detected for {resource_name}")
         #    if instance["resource"]["count"] >1:
 
         #        node_name = f"{resource_name}-{i+1}"
