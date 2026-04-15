@@ -1520,13 +1520,16 @@ class ResourceAgent:
             #cloud = offer_data["ids"]["provider_id"]
             cloud = offer_data["ids"]["res_type"]
             if cloud == "edge":
-                
+            
+        
                 print(f"[DEBUG] AWS resource detected for {resource_name}")
+            if cloud == "cloud":
+                cloud = "aws"
         #    if instance["resource"]["count"] >1:
 
         #        node_name = f"{resource_name}-{i+1}"
         #    else:
-        
+
             node_name = resource_name
             worker_node_aws = (
                     f'{{"cloud": "aws",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
