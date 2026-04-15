@@ -1526,9 +1526,10 @@ class ResourceAgent:
 
         #        node_name = f"{resource_name}-{i+1}"
         #    else:
+        
             node_name = resource_name
             worker_node_aws = (
-                    f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
+                    f'{{"cloud": "aws",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
                     f'"instance_type": "{aws_instance_type}",'
                     f'"ha": false,'
                     f'"ami": "{aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
