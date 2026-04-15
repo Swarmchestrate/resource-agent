@@ -1470,7 +1470,7 @@ class ResourceAgent:
         master_ip = self.master_info["master_ip"]
         k3s_token = self.master_info["k3s_token"]
         print(f"[DEBUG] instance_type is {instance_type}, k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
-        #cloud = offer_data["ids"]["res_type"]
+        cloud = offer_data["ids"]["res_type"]
         
         # TODO: for worker nodes, do the same as master node
         # Get the offer info of the resource(s) to deploy
@@ -1518,13 +1518,16 @@ class ResourceAgent:
         #for i in range(instance["resource"]["count"]):
         #    cloud = instance["resource"]["provider"]
             #cloud = offer_data["ids"]["provider_id"]
-            cloud = offer_data["ids"]["res_type"]
+            #cloud = offer_data["ids"]["res_type"]
+            print(f"[DEBUG] cloud is {cloud}")
             if cloud == "edge":
             
         
                 print(f"[DEBUG] AWS resource detected for {resource_name}")
             if cloud == "cloud":
                 cloud = "aws"
+            else:
+                printf(f"[DEBUG] Non-AWS resource detected for {resource_name}, cloud type: {cloud}")
         #    if instance["resource"]["count"] >1:
 
         #        node_name = f"{resource_name}-{i+1}"
