@@ -1527,7 +1527,7 @@ class ResourceAgent:
             if cloud == "cloud":
                 cloud = "aws"
             else:
-                printf(f"[DEBUG] Non-AWS resource detected for {resource_name}, cloud type: {cloud}")
+                print(f"[DEBUG] Non-AWS resource detected for {resource_name}, cloud type: {cloud}")
         #    if instance["resource"]["count"] >1:
 
         #        node_name = f"{resource_name}-{i+1}"
