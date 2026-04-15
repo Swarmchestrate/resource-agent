@@ -1539,7 +1539,7 @@ class ResourceAgent:
                     f'"ami": "{aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
                     f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
                     f'"resource_name":"{node_name}",' # Ze: to think about how to name
-                    f'"ssh_user": "{ssh_user}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
+                    f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
                  #   f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
                     f'"ssh_key": "{ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
                     f'"k3s_role": "{k3s_role}",' # Ze: this should be default 
@@ -1579,7 +1579,7 @@ class ResourceAgent:
                     f'"edge_device_ip": "{edge_device_ip}",'
                     f'"ha": false,'
                     f'"resource_name":"{node_name}",'
-                    f'"ssh_user": "{ssh_user}",'
+                    f'"ssh_user": "ec2-user",'
                     f'"ssh_key": "{ssh_key_path}",'
                     f'"ssh_auth_method": "key",'
                     f'"k3s_role": "worker",'
