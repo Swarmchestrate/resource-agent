@@ -1521,8 +1521,6 @@ class ResourceAgent:
             #cloud = offer_data["ids"]["res_type"]
             print(f"[DEBUG] cloud is {cloud}")
             if cloud == "edge":
-            
-        
                 print(f"[DEBUG] AWS resource detected for {resource_name}")
             if cloud == "cloud":
                 cloud = "aws"
