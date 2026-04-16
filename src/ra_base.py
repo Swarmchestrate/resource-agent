@@ -1194,6 +1194,7 @@ class ResourceAgent:
                 "sztaki": master_node_openstack,  # Add sztaki here
                 "edge": master_node_edge
             }[cloud]
+            print(f"[DEBUG] master_node string is {master_node}")
             master_node = json.loads(master_node)
 
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
