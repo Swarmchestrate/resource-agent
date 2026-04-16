@@ -1107,10 +1107,12 @@ class ResourceAgent:
             ssh_key_path = node_info.get("ssh_key", "")
             ssh_user = node_info.get("ssh_user", "ec2-user")
             ssh_user = "ec2-user"
-            cloud = offer_info["ids"]["res_type"]
-            if cloud == "cloud":
-                cloud = offer_info["ids"]["provider_id"]
+# TODO: FIXME
+#            cloud = offer_info["ids"]["res_type"]
+#            if cloud == "cloud":
+#                cloud = offer_info["ids"]["provider_id"]
 
+            cloud ="edge"
             # edge
             ssh_auth_method = node_info.get("ssh_auth_method", "")
             edge_device_ip = node_info.get("edge_device_ip", "")
