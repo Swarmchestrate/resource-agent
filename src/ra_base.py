@@ -577,8 +577,8 @@ class ResourceAgent:
         # This correctly handles: job_offers[job_id][ms_id][offer_id]['ids']['ra_id']
         self.lead_resource[job_id] = next(
             (ms_id for ms_id, offers in self.job_offers[job_id].items() 
-            if any(data.get('ids', {}).get('ra_id') == 'ra-aws-cloud-us' for data in offers.values())), 
-            #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-edge-uk' for data in offers.values())), 
+            #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-cloud-us' for data in offers.values())), 
+            if any(data.get('ids', {}).get('ra_id') == 'ra-aws-edge-uk' for data in offers.values())), 
             #if any(data.get('ids', {}).get('ra_id') == 'ra-sztaki-cloud-hu' for data in offers.values())), 
             None
         )
