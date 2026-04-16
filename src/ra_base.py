@@ -1051,7 +1051,7 @@ class ResourceAgent:
         #print(f"[DEBUG]node_name is {node_name}")
         tosca = message.get('tosca', {})
         cloud = instance["cloud"]
-        #print(f"[DEBUG]cloud is {cloud}")
+        print(f"[DEBUG]cloud is {cloud}")
         #cloud = "openstack"
         #instance_type = "m2.small"
         #print(f"instance is {instance}")
@@ -1105,12 +1105,14 @@ class ResourceAgent:
             # general
             # TODO: ssh_key_path should be a property defined in cdt, for now, some are missing, and naming is not consistent.
             ssh_key_path = node_info.get("ssh_key", "")
-            ssh_user = node_info.get("ssh_user", "ubuntu")
+            ssh_user = node_info.get("ssh_user", "ec2-user")
+            ssh_user = "ec2-user"
 
             # edge
             ssh_auth_method = node_info.get("ssh_auth_method", "")
             edge_device_ip = node_info.get("edge_device_ip", "")
             ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
+            print(f"[DEBUG] ms_id is {ms_id}")
 
             # aws
             aws_instance_type = node_info.get("instance_type", "")
@@ -1175,7 +1177,7 @@ class ResourceAgent:
                 f'"edge_device_ip": "{edge_device_ip}",'
                 f'"ha": false,'
                 f'"cluster_name": "{job_id}",'
-                f'"resource_name":"{node_name}",'
+                f'"resource_name":"{ms_id}",'
                 f'"ssh_user": "{ssh_user}",'
                 f'"ssh_key": "{ssh_key_path}",'
                 f'"ssh_auth_method": "key",'
