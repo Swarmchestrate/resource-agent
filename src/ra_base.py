@@ -640,9 +640,12 @@ class ResourceAgent:
             #print(f"Sent selected offer to RA {ra_id} from RA {self.ra_id}")
               
 
-
-        print("Press a key to continue:")
-        key_to_continue = input()
+        if _os.getenv("AUTO_APPROVE", "false") == "true":
+            print("AUTO_APPROVE is enabled, automatically proceeding with lead resource creation...")
+            time.sleep(2)  # Simulate a brief pause for realism
+        else:
+            print("Press a key to continue:")
+            key_to_continue = input()
         msg_lead_resource_request_ra = {
                 "job_id": job_id,
                 "hub_ra": self.peer.peer_id,
@@ -1070,10 +1073,12 @@ class ResourceAgent:
         #print(f"!!!!!! [DEBUG] rdt is {rdt}")
         #cluster_info = Sardou(content=rdt).get_cluster()
         #print(f"cluster_info is {cluster_info}")
-        print("Press a key to continue:")
-
-
-        key_to_continue = input()
+        if _os.getenv("AUTO_APPROVE", "false") == "true":
+            print("AUTO_APPROVE is enabled, automatically proceeding with lead resource creation...")
+            time.sleep(2)  # Simulate a brief pause for realism
+        else:
+            print("Press a key to continue:")
+            key_to_continue = input()
 
         # Ze-done: finish the RA which receives the msg and to create a VM
         if(LR):
