@@ -1117,7 +1117,7 @@ class ResourceAgent:
 #            if cloud == "cloud":
 #                cloud = offer_info["ids"]["provider_id"]
 
-            cloud ="edge"
+            cloud ="openstack"
             # edge
             ssh_auth_method = node_info.get("ssh_auth_method", "")
             edge_device_ip = node_info.get("edge_device_ip", "")
