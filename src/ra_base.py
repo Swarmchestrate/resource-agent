@@ -1130,7 +1130,8 @@ class ResourceAgent:
 
             # sztaki openstack
             openstack_image_id = node_info.get("image_id", "")
-            openstack_network_id = node_info.get("openstack_network_id", "")
+            openstack_network_id = node_info.get("network_id", "")
+			#openstack_network_id = node_info.get("openstack_network_id", "")
             openstack_flavor_name = node_info.get("flavor_name", "")
 
             print(f"ssh_user is {ssh_user}, ssh_key_path is {ssh_key_path}")
