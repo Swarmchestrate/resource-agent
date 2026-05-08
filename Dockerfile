@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     ca-certificates \
     gnupg \
+    nano \
     libcap2 \
     libcap2-bin \
     && rm -rf /var/lib/apt/lists/*
