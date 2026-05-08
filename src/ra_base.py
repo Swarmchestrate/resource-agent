@@ -575,13 +575,13 @@ class ResourceAgent:
         self.lead_resource[job_id] = random.choice(valid) if valid else None
         # 1. Look inside the nested offers to find the specific RA ID
         # This correctly handles: job_offers[job_id][ms_id][offer_id]['ids']['ra_id']
-        self.lead_resource[job_id] = next(
-            (ms_id for ms_id, offers in self.job_offers[job_id].items() 
-            #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-cloud-us' for data in offers.values())), 
-            if any(data.get('ids', {}).get('ra_id') == 'ra-aws-edge-uk' for data in offers.values())), 
-            #if any(data.get('ids', {}).get('ra_id') == 'ra-sztaki-cloud-hu' for data in offers.values())), 
-            None
-        )
+        #self.lead_resource[job_id] = next(
+        #    (ms_id for ms_id, offers in self.job_offers[job_id].items() 
+        #    #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-cloud-us' for data in offers.values())), 
+        #    #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-edge-uk' for data in offers.values())), 
+        #    if any(data.get('ids', {}).get('ra_id') == 'ra-sztaki-cloud-hu' for data in offers.values())), 
+        #    None
+        #)
 
         # Ze-TODO: this is a test for print the output of rdt(cdt, offer)
 
