@@ -1305,8 +1305,8 @@ class ResourceAgent:
             # Ze-done: Create registry secret on the LR using cluster-builder library
             registry_config = {
                 "master_ip": master_ip,
-                "ssh_user": self.ssh_user, #Ze-TODO: ubuntu for openstack
-                "ssh_private_key_path": self.ssh_key_path,
+                "ssh_user": ssh_user, #Ze-TODO: ubuntu for openstack
+                "ssh_private_key_path": ssh_key_path,
                 "secret_names": ["regcred"] #optional
                 #"namespace":"test" , #optional
             }
@@ -1324,8 +1324,8 @@ class ResourceAgent:
 #                f'{{"manifest_folder": "/home/ubuntu/e2e-demo/k3s-{job_id}",'
 
                 f'"master_ip": "{master_ip}",'
-                f'"ssh_key_path": "{self.ssh_key_path}",'
-                f'"ssh_user": "{self.ssh_user}"}}'
+                f'"ssh_key_path": "{ssh_key_path}",'
+                f'"ssh_user": "{ssh_user}"}}'
                 #f'"ssh_user": "ec2-user"}}'
             )
             cfg = json.loads(manifest_cfg)
