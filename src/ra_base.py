@@ -1109,9 +1109,9 @@ class ResourceAgent:
             
             # general
             # TODO: ssh_key_path should be a property defined in cdt, for now, some are missing, and naming is not consistent.
-            ssh_key_path = node_info.get("ssh_key", "")
+            ssh_key_path = node_info.get("key_name", "")
             ssh_user = node_info.get("ssh_user", "ec2-user")
-            ssh_user = "ec2-user"
+#            ssh_user = "ec2-user"
 # TODO: FIXME
 #            cloud = offer_info["ids"]["res_type"]
 #            if cloud == "cloud":
