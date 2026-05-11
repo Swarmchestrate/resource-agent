@@ -30,6 +30,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application source
 COPY src/ ./src/
+COPY k3s/ ./k3s
 
 # Create directories used at runtime
 RUN mkdir -p KB
