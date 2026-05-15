@@ -108,7 +108,6 @@ class ResourceAgent:
         #for key, value in self.capreg.get_capacity_info().items():
         #    print(f"[DEBUG]   {key}: {value}")
 
-        # KB-TODO: this is a test for uploading CDT, note that yaml dictionary format is required for uploading to KB.
     ########
     # CDT
     ########
@@ -126,14 +125,14 @@ class ResourceAgent:
                 self.logger.error(f"RA{self.ra_id}: Upload to KB failed: {upload['error']}")
 
         # Extract cluster-builder required values
-        # Ze-TODO: these values may not be needed anymore, tosca.get_cluster() function should return these values, but it is not implemented yet
-        # Ze-TODO: Maybe these should be defined in the capacity file instead of config file
-        self.ssh_key_path = self.config.get('ssh_key_path', '')
-        self.ssh_user = self.config.get('ssh_user', '')
-        self.aws_ami = self.config.get('aws_ami', '')
-        self.openstack_image_id = self.config.get('openstack_image_id', '')
-        self.openstack_network_id = self.config.get('openstack_network_id', '')
-        self.edge_device_ip = self.config.get('edge_device_ip', '')
+        # Ze-DONE: these values may not be needed anymore, tosca.get_cluster() function should return these values, but it is not implemented yet
+        # Ze-DONE: Maybe these should be defined in the capacity file instead of config file
+        #self.ssh_key_path = self.config.get('ssh_key_path', '')
+        #self.ssh_user = self.config.get('ssh_user', '')
+        #self.aws_ami = self.config.get('aws_ami', '')
+        #self.openstack_image_id = self.config.get('openstack_image_id', '')
+        #self.openstack_network_id = self.config.get('openstack_network_id', '')
+        #self.edge_device_ip = self.config.get('edge_device_ip', '')
 
         # Initialize P2P communication
         self.peer = None
@@ -331,7 +330,7 @@ class ResourceAgent:
             
             
             save_path = f"./KB/tosca_{job_id}.yaml"
-            # KB-TODO: save the tosca file to local first, then upload to KB, in the future, we can directly upload the tosca content to KB without saving a local file
+            # KB-DONE: save the tosca file to local first, then upload to KB, in the future, we can directly upload the tosca content to KB without saving a local file
             with open(save_path, 'w') as f:
                 yaml.dump(self.job_tosca[job_id], f)
 
@@ -383,16 +382,9 @@ class ResourceAgent:
                 }
 
                 # Broadcast to all other RAs
-	            # Ze-TODO: modify this, to use broadcast method
                 for ra_id in other_ras:
                     self.peer.send(ra_id, "MSG_JOB_BROADCAST", broadcast_message)
                     self.logger.info(f"Broadcasted application to {ra_id}")
-                        # TODO: at here create a folder to store TOSCA
-
-                #save_path = f"./KB/tosca_{job_id}.yaml"
-                #with open(save_path, 'w') as f:
-                #    yaml.dump(self.job_tosca[job_id], f)
-                #print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
 
                 # Process locally as well
                 self._process_job_requirements(job_id, client_id, save_path, self.peer.peer_id)            
@@ -490,7 +482,6 @@ class ResourceAgent:
            "ra_id": self.ra_id,
            "provider": self.capacity.get('metadata', {}).get('resource-provider'),
            "timestamp": time.time(),
-           # cap-lib-TODO: replace resource_responses with offers, to achieve this, one need to output and compare them
            "responses": offers
         }
 
@@ -557,7 +548,7 @@ class ResourceAgent:
                 return None
 
         print("Valid resource combinations found. Selecting lead resource...") 
-        # Ze-TODO: randomly select a resource's RA node as LR
+        # Ze-DONE: randomly select a resource's RA node as LR
         # Ze-DONE: for demo purpose, we hardcode the lead resource to be 'ra-aws-cloud-us'
         #self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
         
@@ -583,23 +574,11 @@ class ResourceAgent:
         #    None
         #)
 
-        # Ze-TODO: this is a test for print the output of rdt(cdt, offer)
 
         #print(f"[DEBUG] lead_resource for job {job_id} is {self.lead_resource[job_id]}")
         # 3. Safely extract the details from the chosen Lead Resource
         selected_ms = self.lead_resource[job_id]
         print(f"[DEBUG] selected ms is {selected_ms}")
-        #print(f"[DEBUG] offer for the selected ms is {self.job_offers[job_id][selected_ms]}")
-        #print(f"capacity_file {self.capacity_file}") 
-        #cdt = Sardou(self.capacity_file)
-        # the offer has to contain the name of resource key
-        #offer = {selected_ms: self.job_offers[job_id][selected_ms]}
-        #print(f"offer is {offer}")
-            # Generate the RDT based on the resource offer info
-        #rdt = cdt.generate_rdt(offer, output_path="edge-rdt.yaml")
-        #print(f"!!!!!! [DEBUG] rdt is {rdt}")
-        #cluster_info = Sardou(content=rdt).get_cluster()
-        #print(f"cluster_info is {cluster_info}")
 
         if selected_ms:
             # Get the keys and ensure there is at least one offer
@@ -699,7 +678,6 @@ class ResourceAgent:
             provider = ra_data['provider']
             responses = ra_data['responses']
             
-            # TODO: may need to put provider back 
             # row = f"{ra_id} ({provider})"[:29].ljust(30)
             row = f"{ra_id} "[:29].ljust(30)
             # implement logic that answer is yes if resource is in the response and has 'ids' and 'characteristics' keys, otherwise is no
@@ -992,7 +970,6 @@ class ResourceAgent:
         return result
 
 
-    # cap-lib-TODO:
     def _handle_selected_offer(self, peer_id, message):
         """
             Ze:
@@ -1093,12 +1070,13 @@ class ResourceAgent:
             # Ze-DONE: dynamically handle capacity type and key path
             # Ze-TODO: why the key for fetching key_name is different across clouds?
             cloud_type = lead_resource_ids["ids"]["res_type"]
+            ssh_key_path = node_info.get("ssh_key", "")
             if cloud_type == "edge":
                 cloud = cloud_type
-                ssh_key_path = node_info.get("ssh_key", "")
             else:
                 cloud = lead_resource_ids["ids"]["provider_id"]
-                ssh_key_path = node_info.get("ssh_key", "")
+                if cloud == "openstack":
+                    ssh_key_path = node_info.get("key_name", "")
             print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
 
             # general
@@ -1251,9 +1229,9 @@ class ResourceAgent:
             }
             configMap_config_path = f"k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
             # The ra_ip should be the ip of one of the RAs, don't be confused with master_ip which is the LR ip.
-            # Ze-TODO: we need to make sure the hub RA ip is reachable by all RAs.
             write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.hub_ra_ip+"")
-            
+           
+            # Ze-TODO: output directory
             # Ze:TODO: translate tosca -> k3s manifest, this should be done in SA, but it requires puccini installation
             self.logger.info("Converting Tosca into k3s manifests.")
             #tpl = parse_tosca(self.tosca_path)
@@ -1445,13 +1423,12 @@ class ResourceAgent:
         k3s_role = instance["k3s_role"]
        #resource_name = instance["node-name"]
         resource_name = offer_data["ids"]["ms_id"]
-        self.master_info = message.get('master_info') # Ze-TODO: master info should be job_id specific
+        self.master_info = message.get('master_info') 
         cluster_name = self.master_info["cluster_name"]
         master_ip = self.master_info["master_ip"]
         k3s_token = self.master_info["k3s_token"]
         print(f"[DEBUG]  k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
         
-        # TODO: for worker nodes, do the same as master node
         # Get the offer info of the resource(s) to deploy
         resource_offer = {resource_name: {offer_data["ids"]["offer_id"]: offer_data}}
 
@@ -1470,17 +1447,20 @@ class ResourceAgent:
         
         node_info = next(iter(cluster_info.values()), {})
         
+        ssh_key_path = node_info.get("ssh_key", "")
+
+        # dynamic cloud handling
         cloud_type = offer_data["ids"]["res_type"]
         if cloud_type == "edge":
             cloud = cloud_type
-            ssh_key_path = node_info.get("ssh_key", "")
         else:
             cloud = offer_data["ids"]["provider_id"]
-            ssh_key_path = node_info.get("ssh_key", "")
+            if cloud == "openstack":
+                ssh_key_path = node_info.get("key_name", "")
+        
         print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
         
         # general
-        # TODO: ssh_key_path should be a property defined in cdt, for now, some are missing, and naming is not consistent.
         ssh_user = node_info.get("ssh_user", "ubuntu")
 
         # edge
@@ -1500,7 +1480,8 @@ class ResourceAgent:
         
         
         for i in range(1):
-        
+        # Ze-TODO: count is not working
+
         #for i in range(instance["resource"]["count"]):
         #    cloud = instance["resource"]["provider"]
             #cloud = offer_data["ids"]["provider_id"]
