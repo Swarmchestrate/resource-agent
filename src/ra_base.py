@@ -1095,10 +1095,10 @@ class ResourceAgent:
             cloud_type = lead_resource_ids["ids"]["res_type"]
             if cloud_type == "edge":
                 cloud = cloud_type
-                ssh_key_path = node_info.get("ssh_key", "")
+                ssh_key_path = node_info.get("key_name", "")
             else:
                 cloud = lead_resource_ids["ids"]["provider_id"]
-                ssh_key_path = node_info.get("key_name", "")
+                ssh_key_path = node_info.get("ssh_key", "")
             print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
 
             # general
@@ -1462,10 +1462,10 @@ class ResourceAgent:
         cloud_type = offer_data["ids"]["res_type"]
         if cloud_type == "edge":
             cloud = cloud_type
-            ssh_key_path = node_info.get("ssh_key", "")
+            ssh_key_path = node_info.get("key_name", "")
         else:
             cloud = offer_data["ids"]["provider_id"]
-            ssh_key_path = node_info.get("key_name", "")
+            ssh_key_path = node_info.get("ssh_key", "")
         print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
         # Get a Sardou object of the CDT
         cdt = Sardou(self.capacity_file)
@@ -1507,12 +1507,6 @@ class ResourceAgent:
             #cloud = offer_data["ids"]["provider_id"]
             #cloud = offer_data["ids"]["res_type"]
             print(f"[DEBUG] cloud is {cloud}")
-            if cloud == "edge":
-                print(f"[DEBUG] AWS resource detected for {resource_name}")
-            if cloud == "cloud":
-                cloud = "aws"
-            else:
-                print(f"[DEBUG] Non-AWS resource detected for {resource_name}, cloud type: {cloud}")
         #    if instance["resource"]["count"] >1:
 
         #        node_name = f"{resource_name}-{i+1}"
