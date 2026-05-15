@@ -1095,7 +1095,7 @@ class ResourceAgent:
             cloud_type = lead_resource_ids["ids"]["res_type"]
             if cloud_type == "edge":
                 cloud = cloud_type
-                ssh_key_path = node_info.get("key_name", "")
+                ssh_key_path = node_info.get("ssh_key", "")
             else:
                 cloud = lead_resource_ids["ids"]["provider_id"]
                 ssh_key_path = node_info.get("ssh_key", "")
@@ -1473,7 +1473,7 @@ class ResourceAgent:
         cloud_type = offer_data["ids"]["res_type"]
         if cloud_type == "edge":
             cloud = cloud_type
-            ssh_key_path = node_info.get("key_name", "")
+            ssh_key_path = node_info.get("ssh_key", "")
         else:
             cloud = offer_data["ids"]["provider_id"]
             ssh_key_path = node_info.get("ssh_key", "")
