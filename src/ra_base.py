@@ -1042,37 +1042,20 @@ class ResourceAgent:
         """
         self.logger.info(f"RA {self.ra_id} receives create lead resource request from {peer_id}")
         job_id = message.get('job_id')
-
         LR = message.get('lead_resource')
         lead_resource_name = message.get('leader_resource_name')
-        #print(f"[DEBUG]lead_resource_name is {lead_resource_name}")
         instance = message.get('instance', {})
         instance_type = instance["instance_type"]
-        #print(f"[DEBUG]instance_type is {instance_type}")
         k3s_role = instance["k3s_role"]
         node_name = instance["node-name"]
-        #print(f"[DEBUG]node_name is {node_name}")
         tosca = message.get('tosca', {})
-        cloud = instance["cloud"]
-        print(f"[DEBUG]cloud is {cloud}")
-        #cloud = "openstack"
-        #instance_type = "m2.small"
-        #print(f"instance is {instance}")
+        print(f"[DEBUG] information from instance node name is  {node-name}, instance_type is {instance_type}")
 
-        # FIXME
         offer_info = message.get('offer_info', {})
-        #print(f"offer_info received by LR is {offer_info}")
+        print(f"offer_info received by LR is {offer_info}")
             # Get the offer info of the resource(s) to deploy
         lead_resource_offer = {lead_resource_name: offer_info[lead_resource_name]}
 
-            # Get a Sardou object of the CDT
-        #cdt = Sardou(self.capacity_file)
-
-            # Generate the RDT based on the resource offer info
-        #rdt = cdt.generate_rdt(lead_resource_offer)
-        #print(f"!!!!!! [DEBUG] rdt is {rdt}")
-        #cluster_info = Sardou(content=rdt).get_cluster()
-        #print(f"cluster_info is {cluster_info}")
         if _os.getenv("AUTO_APPROVE", "false") == "true":
             print("AUTO_APPROVE is enabled, automatically proceeding with lead resource creation...")
             time.sleep(2)  # Simulate a brief pause for realism
@@ -1089,40 +1072,44 @@ class ResourceAgent:
 
             # Get the offer info of the resource(s) to deploy
             lead_resource_offer = {lead_resource_name: offer_info[lead_resource_name]}
-
-            print(f"offer_info received by LR is {lead_resource_offer}")
-
+            print(f"offer_info received by LR is {lead_resource_offer} \n")
+            ms_name = next(iter(lead_resource_offer))
+            offer_id = next(iter(lead_resource_offer[ms_name]))
+            lead_resource_ids = lead_resource_offer[ms_name][offer_id]
 
             # Get a Sardou object of the CDT
             cdt = Sardou(self.capacity_file)
 
             # Generate the RDT based on the resource offer info
             rdt = cdt.generate_rdt(lead_resource_offer)
-            print(f"!!!!!! [DEBUG] rdt is {rdt}")
+            print(f"[DEBUG] rdt is {rdt} \n")
 
             # Get the cluster info 
-            # FIXME: Currently get_cluster() is not working
             cluster_info = Sardou(content=rdt).get_cluster()
-            print(f"!!!!!! [DEBUG] cluster_info is {cluster_info}")
+            print(f"[DEBUG] cluster_info is {cluster_info} \n")
             
             node_info = next(iter(cluster_info.values()), {})
+            print(f"[DEBUG] node_info is {node_info} \n")
             
-            # general
-            # TODO: ssh_key_path should be a property defined in cdt, for now, some are missing, and naming is not consistent.
-            ssh_key_path = node_info.get("key_name", "")
-            ssh_user = node_info.get("ssh_user", "ec2-user")
-#            ssh_user = "ec2-user"
-# TODO: FIXME
-#            cloud = offer_info["ids"]["res_type"]
-#            if cloud == "cloud":
-#                cloud = offer_info["ids"]["provider_id"]
+            # Ze-DONE: dynamically handle capacity type and key path
+            # Ze-TODO: why the key for fetching key_name is different across clouds?
+            cloud_type = lead_resource_ids["ids"]["res_type"]
+            if cloud_type == "edge":
+                cloud = cloud_type
+                ssh_key_path = node_info.get("ssh_key", "")
+            else:
+                cloud = lead_resource_ids["ids"]["provider_id"]
+                ssh_key_path = node_info.get("key_name", "")
+            print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
 
-            cloud ="openstack"
+            # general
+            ssh_user = node_info.get("ssh_user", "ec2-user")
+            
+            # resource specific configurations for cluster builder's iuputs
             # edge
             ssh_auth_method = node_info.get("ssh_auth_method", "")
             edge_device_ip = node_info.get("edge_device_ip", "")
             ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
-            print(f"[DEBUG] ms_id is {ms_id}")
 
             # aws
             aws_instance_type = node_info.get("instance_type", "")
@@ -1131,7 +1118,6 @@ class ResourceAgent:
             # sztaki openstack
             openstack_image_id = node_info.get("image_id", "")
             openstack_network_id = node_info.get("network_id", "")
-			#openstack_network_id = node_info.get("openstack_network_id", "")
             openstack_flavor_name = node_info.get("flavor_name", "")
 
             print(f"ssh_user is {ssh_user}, ssh_key_path is {ssh_key_path}")
@@ -1150,17 +1136,15 @@ class ResourceAgent:
                     "source": "10.0.0.0/16"
                 }
             ])
-            # For future automation, we need to make sure each RA has the required ssh key pair, security group, ami, etc for each provider.
             master_node_aws = (
-                f'{{"cloud": "{cloud}",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
+                f'{{"cloud": "{cloud}",'   
                 f'"instance_type": "{aws_instance_type}",'
                 f'"ha": false,'
                 f'"cluster_name": "{job_id}",'
-                f'"ami": "{aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
-                f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
-                f'"resource_name":"{node_name}",' # Ze: to think about how to name
-                f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
-            #    f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
+                f'"ami": "{aws_ami}",' 
+                f'"security_group_id": "",'
+                f'"resource_name":"{node_name}",' 
+                f'"ssh_user": "ec2-user",' 
                 f'"ssh_key": "{ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
                 f'"k3s_role": "{k3s_role}",' # Ze: this should be default 
                 f'"custom_ingress_ports": {ports}}}'
@@ -1305,7 +1289,7 @@ class ResourceAgent:
             # Ze-done: Create registry secret on the LR using cluster-builder library
             registry_config = {
                 "master_ip": master_ip,
-                "ssh_user": ssh_user, #Ze-TODO: ubuntu for openstack
+                "ssh_user": ssh_user, 
                 "ssh_private_key_path": ssh_key_path,
                 "secret_names": ["regcred"] #optional
                 #"namespace":"test" , #optional
@@ -1367,10 +1351,6 @@ class ResourceAgent:
 
         tasks = []
         for res, res_info in offer_info.items():
-            # [Ze-DEBUG
-            # if res_info["count"] <= 0:
-            #    continue
-
             # [Ze-DEBUG]
                 # 1. Get the dictionary containing the actual data (ids/characteristics)
             # This skips over the long "ra-aws-edge-uk_job_..." key
@@ -1379,14 +1359,10 @@ class ResourceAgent:
             # 2. Reach into the "ids" block to get the ra_id
             ra_id = offer_data["ids"]["ra_id"]
             print(f"Service: {res} | RA ID: {ra_id}")
-            #resource = offer_data["ids"]["res_id"]
 
             if res == self.lead_resource[job_id]:
                 print(f"Skipping lead resource {res} with RA ID {ra_id}")
                 continue
-
-            # ra_id = res_info["ra_id"]
-            # print(f"ra_id in offer_info is {ra_id}")
 
             msg_create_resource = {
                 "job_id": job_id,
@@ -1412,8 +1388,6 @@ class ResourceAgent:
                 )
             )
 
-        # If you want "non-blocking" as in "don't wait at all", comment this out.
-        # Keeping it ensures sends are dispatched before we update state.
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -1444,13 +1418,6 @@ class ResourceAgent:
         task.add_done_callback(_log_task_result)
         
     def _handle_create_resource(self, peer_id, message):
-        # import threading
-        # thread = threading.Thread(
-        #     target=self._handle_create_resource_blocking,
-        #     args=(peer_id, message),
-        #     daemon=True,
-        # )
-        # thread.start()
 
         import threading
 
@@ -1473,6 +1440,8 @@ class ResourceAgent:
         instance = message.get('instance', {})
         offer_data = next(iter(instance["resource"].values()))
     
+        print(f"[DEBUG]  Offer_data is: mainly to check whether there is resource count? \n {offer_data} \n")
+        
         # 2. Reach into the "ids" block to get the ra_id
         instance_type = offer_data["ids"]["res_id"]
         #instance_type = instance["resource"]["instance_type"]
@@ -1483,32 +1452,37 @@ class ResourceAgent:
         cluster_name = self.master_info["cluster_name"]
         master_ip = self.master_info["master_ip"]
         k3s_token = self.master_info["k3s_token"]
-        print(f"[DEBUG] instance_type is {instance_type}, k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
-        cloud = offer_data["ids"]["res_type"]
+        print(f"[DEBUG] instance_type (from ids.res_id) is {instance_type}, k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
         
         # TODO: for worker nodes, do the same as master node
         # Get the offer info of the resource(s) to deploy
         resource_offer = {resource_name: {offer_data["ids"]["offer_id"]: offer_data}}
 
-        print(f"offer_info received by worker node is {resource_offer}")
+        print(f"resource offer is received by worker node is {resource_offer}")
 
+        cloud_type = offer_data["ids"]["res_type"]
+            if cloud_type == "edge":
+                cloud = cloud_type
+                ssh_key_path = node_info.get("ssh_key", "")
+            else:
+                cloud = offer_data["ids"]["provider_id"]
+                ssh_key_path = node_info.get("key_name", "")
+        print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
         # Get a Sardou object of the CDT
         cdt = Sardou(self.capacity_file)
 
         # Generate the RDT based on the resource offer info
         rdt = cdt.generate_rdt(resource_offer)
-        print(f"!!!!!! [DEBUG] rdt is {rdt}")
+        print(f"[DEBUG] rdt is {rdt}\n")
 
         # Get the cluster info 
-        # FIXME: Currently get_cluster() is not working
         cluster_info = Sardou(content=rdt).get_cluster()
-        print(f"!!!!!! [DEBUG] cluster_info is {cluster_info}")
+        print(f"[DEBUG] cluster_info is {cluster_info}\n")
         
         node_info = next(iter(cluster_info.values()), {})
         
         # general
         # TODO: ssh_key_path should be a property defined in cdt, for now, some are missing, and naming is not consistent.
-        ssh_key_path = node_info.get("ssh_key", "")
         ssh_user = node_info.get("ssh_user", "ubuntu")
 
         # edge
@@ -1522,7 +1496,7 @@ class ResourceAgent:
 
         # sztaki openstack
         openstack_image_id = node_info.get("image_id", "")
-        openstack_network_id = node_info.get("openstack_network_id", "")
+        openstack_network_id = node_info.get("network_id", "")
         openstack_flavor_name = node_info.get("flavor_name", "")
 
         
@@ -1565,17 +1539,11 @@ class ResourceAgent:
             worker_node_openstack = (
                     f'{{"cloud": "{cloud}",'
                     f'"openstack_flavor_id": "{openstack_flavor_name}",'
-
-                    #f'"openstack_flavor_id": "{instance_type}",'
                     f'"ha": false,'
                     f'"openstack_image_id": "{openstack_image_id}",'
-
-                    #f'"openstack_image_id": "{self.openstack_image_id}",'
                     #f'"security_group_id": "",'
                     f'"volume_size": "10",'
                     #f'"floating_ip_pool": "ext-net",'
-                    #f'"network_id": "{self.openstack_network_id}",'
-
                     f'"network_id": "{openstack_network_id}",'
                     f'"resource_name":"{node_name}",'    
                     f'"ssh_user": "{ssh_user}",'
