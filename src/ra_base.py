@@ -652,10 +652,9 @@ class ResourceAgent:
                 "lead_resource": True,
                 "leader_resource_name": self.lead_resource[job_id],
                 "timestamp": message.get('timestamp'),
-                "instance": {"instance_type": instance_type, "cloud": provider, "k3s_role": "master", "node-name": self.lead_resource[job_id]},
+                "instance": {"cloud": provider, "k3s_role": "master", "node-name": self.lead_resource[job_id]},
                 "tosca": self.job_tosca[job_id],
                 "offer_info": self.job_offers[job_id]
-                #"instance": { "cloud": provider ,"instance_type": instance_type ,"ssh_key_name": "g","ssh_user": "ec2-user","k3s_role": "master","ssh_private_key_path": "","ami": "ami-0f7b02bb6a0e14062"}
         }
         
         self.peer.send(LR_id, "MSG_CREATE_LEAD_RESOURCE", msg_lead_resource_request_ra)
@@ -1045,11 +1044,11 @@ class ResourceAgent:
         LR = message.get('lead_resource')
         lead_resource_name = message.get('leader_resource_name')
         instance = message.get('instance', {})
-        instance_type = instance["instance_type"]
+        cloud = message.get('cloud', {})
         k3s_role = instance["k3s_role"]
         node_name = instance["node-name"]
         tosca = message.get('tosca', {})
-        print(f"[DEBUG] information from instance node name is  {node_name}, instance_type is {instance_type}")
+        print(f"[DEBUG] information from instance node name is  {node_name}, {cloud}")
 
         offer_info = message.get('offer_info', {})
         print(f"offer_info received by LR is {offer_info}")
