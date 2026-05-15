@@ -1049,7 +1049,7 @@ class ResourceAgent:
         k3s_role = instance["k3s_role"]
         node_name = instance["node-name"]
         tosca = message.get('tosca', {})
-        print(f"[DEBUG] information from instance node name is  {node-name}, instance_type is {instance_type}")
+        print(f"[DEBUG] information from instance node name is  {node_name}, instance_type is {instance_type}")
 
         offer_info = message.get('offer_info', {})
         print(f"offer_info received by LR is {offer_info}")
