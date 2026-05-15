@@ -1461,12 +1461,12 @@ class ResourceAgent:
         print(f"resource offer is received by worker node is {resource_offer}")
 
         cloud_type = offer_data["ids"]["res_type"]
-            if cloud_type == "edge":
-                cloud = cloud_type
-                ssh_key_path = node_info.get("ssh_key", "")
-            else:
-                cloud = offer_data["ids"]["provider_id"]
-                ssh_key_path = node_info.get("key_name", "")
+        if cloud_type == "edge":
+            cloud = cloud_type
+            ssh_key_path = node_info.get("ssh_key", "")
+        else:
+            cloud = offer_data["ids"]["provider_id"]
+            ssh_key_path = node_info.get("key_name", "")
         print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
         # Get a Sardou object of the CDT
         cdt = Sardou(self.capacity_file)
