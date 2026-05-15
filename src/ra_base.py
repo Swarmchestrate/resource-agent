@@ -510,9 +510,9 @@ class ResourceAgent:
             Only LR is created here because it will create the k3s cluster and returns the master info to the hub RA so that other RAs can connect to it.
         """
 
-        self.logger.info(f"Received resource response from RA: {peer_id}")
         job_id = message.get('job_id')
         ra_id = message.get('ra_id')
+        self.logger.info(f"Received resource response for job {job_id} from RA: {ra_id}")
         provider = message.get('provider')
         responses = message.get('responses', {})
         len_res = len(responses)
@@ -1442,8 +1442,6 @@ class ResourceAgent:
         print(f"[DEBUG]  Offer_data is: mainly to check whether there is resource count? \n {offer_data} \n")
         
         # 2. Reach into the "ids" block to get the ra_id
-        instance_type = offer_data["ids"]["res_id"]
-        #instance_type = instance["resource"]["instance_type"]
         k3s_role = instance["k3s_role"]
        #resource_name = instance["node-name"]
         resource_name = offer_data["ids"]["ms_id"]
@@ -1451,7 +1449,7 @@ class ResourceAgent:
         cluster_name = self.master_info["cluster_name"]
         master_ip = self.master_info["master_ip"]
         k3s_token = self.master_info["k3s_token"]
-        print(f"[DEBUG] instance_type (from ids.res_id) is {instance_type}, k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
+        print(f"[DEBUG]  k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
         
         # TODO: for worker nodes, do the same as master node
         # Get the offer info of the resource(s) to deploy
@@ -1459,14 +1457,6 @@ class ResourceAgent:
 
         print(f"resource offer is received by worker node is {resource_offer}")
 
-        cloud_type = offer_data["ids"]["res_type"]
-        if cloud_type == "edge":
-            cloud = cloud_type
-            ssh_key_path = node_info.get("key_name", "")
-        else:
-            cloud = offer_data["ids"]["provider_id"]
-            ssh_key_path = node_info.get("ssh_key", "")
-        print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
         # Get a Sardou object of the CDT
         cdt = Sardou(self.capacity_file)
 
@@ -1479,6 +1469,15 @@ class ResourceAgent:
         print(f"[DEBUG] cluster_info is {cluster_info}\n")
         
         node_info = next(iter(cluster_info.values()), {})
+        
+        cloud_type = offer_data["ids"]["res_type"]
+        if cloud_type == "edge":
+            cloud = cloud_type
+            ssh_key_path = node_info.get("key_name", "")
+        else:
+            cloud = offer_data["ids"]["provider_id"]
+            ssh_key_path = node_info.get("ssh_key", "")
+        print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
         
         # general
         # TODO: ssh_key_path should be a property defined in cdt, for now, some are missing, and naming is not consistent.
