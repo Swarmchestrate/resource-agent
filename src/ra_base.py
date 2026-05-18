@@ -1081,7 +1081,7 @@ class ResourceAgent:
             
 			# Ze-TODO: temp_port support
             if {self.ra_id} == "UST-RA":
-                ssh_port = 10001
+                ssh_port = 10000
             else:
                 ssh_port = 22
 			# general
