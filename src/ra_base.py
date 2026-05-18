@@ -1078,8 +1078,13 @@ class ResourceAgent:
                 if cloud == "openstack":
                     ssh_key_path = node_info.get("key_name", "")
             print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
-
-            # general
+            
+			# Ze-TODO: temp_port support
+			if {self.ra_id} == "UST-RA":
+				ssh_port = 10001
+			else
+				ssh_port = 22
+			# general
             ssh_user = node_info.get("ssh_user", "ec2-user")
             
             # resource specific configurations for cluster builder's iuputs
@@ -1153,7 +1158,8 @@ class ResourceAgent:
                 f'"ssh_user": "{ssh_user}",'
                 f'"ssh_key": "{ssh_key_path}",'
                 f'"ssh_auth_method": "key",'
-                f'"k3s_role": "{k3s_role}"}}'
+                f'"ssh_port": "{ssh_port}",'
+				f'"k3s_role": "{k3s_role}"}}'
             )
             master_node = {
                 "aws": master_node_aws,
