@@ -1080,10 +1080,10 @@ class ResourceAgent:
             print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
             
 			# Ze-TODO: temp_port support
-			if {self.ra_id} == "UST-RA":
-				ssh_port = 10001
-			else
-				ssh_port = 22
+            if {self.ra_id} == "UST-RA":
+                ssh_port = 10001
+            else:
+                ssh_port = 22
 			# general
             ssh_user = node_info.get("ssh_user", "ec2-user")
             
