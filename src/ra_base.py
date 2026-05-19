@@ -1081,8 +1081,10 @@ class ResourceAgent:
             
 			# Ze-TODO: temp_port support
             if {self.ra_id} == "UST-RA":
+				print(f"[DEBUG] ra_id {self.ra_id} is UST-RA")
                 ssh_port = 10001
             else:
+				print(f"[DEBUG] ra_id {self.ra_id} is normal RA")
                 ssh_port = 22
 			# general
             ssh_user = node_info.get("ssh_user", "ec2-user")
