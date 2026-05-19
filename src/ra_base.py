@@ -1079,14 +1079,12 @@ class ResourceAgent:
                     ssh_key_path = node_info.get("key_name", "")
             print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
             
-			# Ze-TODO: temp_port support
+			# Ze-TODO: temp_port support, should be replaced by fetching from get_cluster() function
+            ssh_port = 22
             if self.ra_id == "UST-RA":
                 print(f"[DEBUG] ra_id {self.ra_id} is UST-RA")
                 ssh_port = 10001
-            else:
-                print(f"[DEBUG] ra_id {self.ra_id} is normal RA")
-                ssh_port = 22
-			# general
+          	# general
             ssh_user = node_info.get("ssh_user", "ec2-user")
             
             # resource specific configurations for cluster builder's iuputs
@@ -1294,6 +1292,7 @@ class ResourceAgent:
 
                 f'"master_ip": "{master_ip}",'
                 f'"ssh_key_path": "{ssh_key_path}",'
+                f'"ssh_port": "{ssh_port}",'
                 f'"ssh_user": "{ssh_user}"}}'
                 #f'"ssh_user": "ec2-user"}}'
             )
