@@ -1274,6 +1274,7 @@ class ResourceAgent:
                 "master_ip": master_ip,
                 "ssh_user": ssh_user, 
                 "ssh_private_key_path": ssh_key_path,
+                "ssh_port": ssh_port,
                 "secret_names": ["regcred"] #optional
                 #"namespace":"test" , #optional
             }
