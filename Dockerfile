@@ -36,9 +36,19 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://get.opentofu.org/install-opent
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies (with architecture-specific handling)
+RUN arch="$(dpkg --print-architecture)" \
+    && if [ "$arch" = "armhf" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+            build-essential gfortran gcc pkg-config \
+            libopenblas-dev liblapack-dev \
+            libpq-dev libffi-dev python3-dev && \
+        export NPY_NUM_BUILD_JOBS="$(nproc)" && \
+        pip install -U pip setuptools wheel && \
+        pip install --no-cache-dir -v --no-binary=numpy,psycopg2-binary,cffi -r requirements.txt; \
+    else \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi
 
 # Copy application source
 COPY src/ ./src/
