@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 
+# Set working directory
+WORKDIR /app
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -28,23 +31,22 @@ RUN arch="$(dpkg --print-architecture)" \
     && (dpkg -i /tmp/puccini.deb || apt-get install -f -y) \
     && rm /tmp/puccini.deb
 
-# Install opentofu
+# Install OpenTofu
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://get.opentofu.org/install-opentofu.sh -o /tmp/install-opentofu.sh \
     && chmod +x /tmp/install-opentofu.sh \
     && /tmp/install-opentofu.sh --install-method deb \
     && rm /tmp/install-opentofu.sh
 
-WORKDIR /app
+COPY requirements.txt .
 
 # Install Python dependencies (with architecture-specific handling)
 RUN arch="$(dpkg --print-architecture)" \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        $(if [ "$arch" = "armhf" ]; then echo "build-essential gfortran gcc pkg-config libopenblas-dev liblapack-dev libpq-dev libffi-dev python3-dev"; fi) \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install -U pip setuptools wheel \
     && if [ "$arch" = "armhf" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends \
-            build-essential gfortran gcc pkg-config \
-            libopenblas-dev liblapack-dev \
-            libpq-dev libffi-dev python3-dev && \
         export NPY_NUM_BUILD_JOBS="$(nproc)" && \
-        pip install -U pip setuptools wheel && \
         pip install --no-cache-dir -v --no-binary=numpy,psycopg2-binary,cffi -r requirements.txt; \
     else \
         pip install --no-cache-dir -r requirements.txt; \
