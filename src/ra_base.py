@@ -520,6 +520,7 @@ class ResourceAgent:
 
         # Check if all RAs have responded
         all_ras = self.peer.find_peers({"peer_type": "RA"})
+        print(f"[DEBUG] The number of job_responses is {len(self.job_responses.get(job_id, {}))}. The number of RAs is {len(all_ras)}. \n")
         #here we need len(all_ras) + 1 because all_ras does not include the main ra, the main ra cannot be detected with the function self.peer.find_peers({"peer_type": "RA"}).
         if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
             print(f"All RAs have responded for job {job_id}. Compiling results...")
@@ -1205,13 +1206,19 @@ class ResourceAgent:
             import os
             #import shutil
 
+
             _os.makedirs(folder_path, exist_ok=True)  # ✅ Creates folder if it doesn't exist
             write_yaml(tosca, f"KB/{job_id}_tosca.yaml")
-            folder_path = f"k3s-{job_id}"
+
+                        # Ze-TODO: output directory
+            # a test
+            #output_dir = f"output/cluster_{job_id}/k3s-{job_id}"
+            #_os.makedirs(output_dir, exist_ok=True)  # ✅ Creates folder if it doesn't exist
+            folder_path = f"output/cluster_{job_id}/k3s-{job_id}"
             _os.makedirs(folder_path, exist_ok=True)  # ✅ Creates folder if it doesn't exist
             src_folder = "k3s"
 
-            # ✅ Copy all files from k3s/ into k3s-{job_id}/
+            # ✅ Copy all files from k3s/ into output/cluster_{job_id}/k3s-{job_id}/
             if _os.path.exists(src_folder):
                 for item in _os.listdir(src_folder):
                     src_path = _os.path.join(src_folder, item)
@@ -1224,7 +1231,7 @@ class ResourceAgent:
                 print(f"⚠️ Warning: Source folder '{src_folder}' does not exist.")
             
             # prepare configmap of tosca file for SA
-            configMap_tosca_path = f"k3s-{job_id}/03-configmap-swarm-agent-tosca.yaml"
+            configMap_tosca_path = f"output/cluster_{job_id}/k3s-{job_id}/03-configmap-swarm-agent-tosca.yaml"
             write_tosca_configmap(f"KB/{job_id}_tosca.yaml", output_file=configMap_tosca_path)
             
             # Ze-done: Prepare configmap of SA configuration
@@ -1234,14 +1241,11 @@ class ResourceAgent:
                 "LEADER": lead_resource_name,
                 "Worker": [res for res in offer_info if res != lead_resource_name]                                
             }
-            configMap_config_path = f"k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
+            configMap_config_path = f"output/cluster_{job_id}/k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
             # The ra_ip should be the ip of one of the RAs, don't be confused with master_ip which is the LR ip.
             write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.hub_ra_ip+"")
            
-            # Ze-TODO: output directory
-            # a test
-            output_dir = f"output/cluster_{job_id}/k3s-{job_id}"
-            _os.makedirs(output_dir, exist_ok=True)  # ✅ Creates folder if it doesn't exist
+
             # Ze:DONE: translate tosca -> k3s manifest, this should be done in SA, but it requires puccini installation
             #self.logger.info("Converting Tosca into k3s manifests.")
             #tpl = parse_tosca(self.tosca_path)
@@ -1290,7 +1294,7 @@ class ResourceAgent:
 
             # Ze-TODO: until here were commented
             # Use absolute path to ensure OpenTofu can find it from any directory
-            absolute_path = os.path.abspath(f"k3s-{job_id}")
+            absolute_path = os.path.abspath(f"output/cluster_{job_id}/k3s-{job_id}")
             print(f"[DEBUG] ssh_port before applying manifests is {ssh_port}\n")
             # copy the manifests from k3s-{job_id}/ to the LR
             manifest_cfg = (
