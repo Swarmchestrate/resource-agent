@@ -1082,8 +1082,9 @@ class ResourceAgent:
 			# Ze-TODO: temp_port support, should be replaced by fetching from get_cluster() function
             ssh_port = 22
             if self.ra_id == "UST-RA":
-                print(f"[DEBUG] ra_id {self.ra_id} is UST-RA")
+                
                 ssh_port = 10001
+				print(f"[DEBUG] ra_id {self.ra_id} is UST-RA, ssh_port is {ssh_port}\n")
           	# general
             ssh_user = node_info.get("ssh_user", "ec2-user")
             
@@ -1285,7 +1286,7 @@ class ResourceAgent:
 
             # Use absolute path to ensure OpenTofu can find it from any directory
             absolute_path = os.path.abspath(f"k3s-{job_id}")
-
+            printf(f"[DEBUG] ssh_port before applying manifests is {ssh_port}\n")
             # copy the manifests from k3s-{job_id}/ to the LR
             manifest_cfg = (
                 f'{{"manifest_folder": "{absolute_path}",'
@@ -1295,7 +1296,6 @@ class ResourceAgent:
                 f'"ssh_key_path": "{ssh_key_path}",'
                 f'"ssh_port": "{ssh_port}",'
                 f'"ssh_user": "{ssh_user}"}}'
-                #f'"ssh_user": "ec2-user"}}'
             )
             cfg = json.loads(manifest_cfg)
             manifest_folder = Path(cfg["manifest_folder"])
@@ -1305,6 +1305,7 @@ class ResourceAgent:
             manifest_folder=str(manifest_folder),
             master_ip=cfg["master_ip"],
             ssh_key_path=cfg["ssh_key_path"],
+            ssh_port=cfg["ssh_port"],
             ssh_user=cfg["ssh_user"]
             ) 
 
