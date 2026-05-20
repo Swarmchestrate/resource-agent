@@ -1239,8 +1239,8 @@ class ResourceAgent:
             write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.hub_ra_ip+"")
            
             # Ze-TODO: output directory
-            # Ze:TODO: translate tosca -> k3s manifest, this should be done in SA, but it requires puccini installation
-            self.logger.info("Converting Tosca into k3s manifests.")
+            # Ze:DONE: translate tosca -> k3s manifest, this should be done in SA, but it requires puccini installation
+            #self.logger.info("Converting Tosca into k3s manifests.")
             #tpl = parse_tosca(self.tosca_path)
 
             from ruamel.yaml import YAML
@@ -1267,23 +1267,25 @@ class ResourceAgent:
             except Exception as e:
                 sys.exit(f"Error: {e}")
 
-            print(f"✅ Kubernetes manifests written to '{OUTPUT_FILE}' ({len(manifests)} items)")
-
+            print(f"✅ Kubernetes manifests written to '{OUTPUT_FILE}' ({len(manifests)} items)\n")
+            print(f"[DEBUG] right before creating registry secret on LR, port is {ssh_port}\n")
 
             # Ze-done: Create registry secret on the LR using cluster-builder library
-            registry_config = {
-                "master_ip": master_ip,
-                "ssh_user": ssh_user, 
-                "ssh_private_key_path": ssh_key_path,
-                "ssh_port": ssh_port,
-                "secret_names": ["regcred"] #optional
-                #"namespace":"test" , #optional
-            }
+			# Ze-TODO: comment the following for now as it seems stucking
+            #registry_config = {
+            #    "master_ip": master_ip,
+            #    "ssh_user": ssh_user, 
+            #    "ssh_private_key_path": ssh_key_path,
+            #    "ssh_port": ssh_port,
+            #    "secret_names": ["regcred"] #optional
+            #    #"namespace":"test" , #optional
+            #}
  
             # Run the registry secret creation
-            swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-            swarmchestrate.create_registry_secrets(registry_config)
+            #swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+            #swarmchestrate.create_registry_secrets(registry_config)
 
+            # Ze-TODO: until here were commented
             # Use absolute path to ensure OpenTofu can find it from any directory
             absolute_path = os.path.abspath(f"k3s-{job_id}")
             printf(f"[DEBUG] ssh_port before applying manifests is {ssh_port}\n")
