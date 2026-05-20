@@ -1288,7 +1288,7 @@ class ResourceAgent:
             # Ze-TODO: until here were commented
             # Use absolute path to ensure OpenTofu can find it from any directory
             absolute_path = os.path.abspath(f"k3s-{job_id}")
-            printf(f"[DEBUG] ssh_port before applying manifests is {ssh_port}\n")
+            print(f"[DEBUG] ssh_port before applying manifests is {ssh_port}\n")
             # copy the manifests from k3s-{job_id}/ to the LR
             manifest_cfg = (
                 f'{{"manifest_folder": "{absolute_path}",'
