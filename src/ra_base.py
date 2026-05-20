@@ -1082,9 +1082,8 @@ class ResourceAgent:
 			# Ze-TODO: temp_port support, should be replaced by fetching from get_cluster() function
             ssh_port = 22
             if self.ra_id == "UST-RA":
-                
                 ssh_port = 10001
-				print(f"[DEBUG] ra_id {self.ra_id} is UST-RA, ssh_port is {ssh_port}\n")
+                print(f"[DEBUG] ra_id {self.ra_id} is UST-RA, ssh_port is {ssh_port}\n")
           	# general
             ssh_user = node_info.get("ssh_user", "ec2-user")
             
