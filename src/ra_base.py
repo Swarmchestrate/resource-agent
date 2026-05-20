@@ -1082,6 +1082,8 @@ class ResourceAgent:
             print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
             
 			# Ze-TODO: temp_port support, should be replaced by fetching from get_cluster() function
+            ssh_port_test = node_info.get("ssh_port", "22")
+            print(f"[DEBUG] ssh_port_test is {ssh_port_test} \n")
             ssh_port = 22
             if self.ra_id == "UST-RA":
                 ssh_port = 10001
