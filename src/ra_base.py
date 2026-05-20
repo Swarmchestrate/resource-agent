@@ -1243,31 +1243,31 @@ class ResourceAgent:
             #self.logger.info("Converting Tosca into k3s manifests.")
             #tpl = parse_tosca(self.tosca_path)
 
-            from ruamel.yaml import YAML
-            from sardou.manifestGenerator import get_kubernetes_manifest
+            # from ruamel.yaml import YAML
+            # from sardou.manifestGenerator import get_kubernetes_manifest
             
-            yaml_parser = YAML()
-            yaml_parser.default_flow_style = False
+            # yaml_parser = YAML()
+            # yaml_parser.default_flow_style = False
 
-            TOSCA_FILE = f"KB/{job_id}_tosca.yaml"
-            OUTPUT_FILE = f"k3s-{job_id}/application-manifest.yaml"
-            IMAGE_PULL_SECRET = "regcred"
+            # TOSCA_FILE = f"KB/{job_id}_tosca.yaml"
+            # OUTPUT_FILE = f"k3s-{job_id}/application-manifest.yaml"
+            # IMAGE_PULL_SECRET = "regcred"
 
-            path = Path(TOSCA_FILE)
-            if not path.exists():
-                sys.exit(f"Error: TOSCA file '{TOSCA_FILE}' not found.")
+            # path = Path(TOSCA_FILE)
+            # if not path.exists():
+            #     sys.exit(f"Error: TOSCA file '{TOSCA_FILE}' not found.")
 
-            try:
-                manifests = get_kubernetes_manifest(TOSCA_FILE, image_pull_secret=IMAGE_PULL_SECRET)
+            # try:
+            #     manifests = get_kubernetes_manifest(TOSCA_FILE, image_pull_secret=IMAGE_PULL_SECRET)
 
-                if not manifests:
-                    sys.exit("Warning: No Kubernetes manifests generated.")
-                with open(OUTPUT_FILE, "w") as f:
-                    yaml_parser.dump_all(manifests, f)
-            except Exception as e:
-                sys.exit(f"Error: {e}")
+            #     if not manifests:
+            #         sys.exit("Warning: No Kubernetes manifests generated.")
+            #     with open(OUTPUT_FILE, "w") as f:
+            #         yaml_parser.dump_all(manifests, f)
+            # except Exception as e:
+            #     sys.exit(f"Error: {e}")
 
-            print(f"✅ Kubernetes manifests written to '{OUTPUT_FILE}' ({len(manifests)} items)\n")
+            # print(f"✅ Kubernetes manifests written to '{OUTPUT_FILE}' ({len(manifests)} items)\n")
             print(f"[DEBUG] right before creating registry secret on LR, port is {ssh_port}\n")
 
             # Ze-done: Create registry secret on the LR using cluster-builder library
