@@ -210,7 +210,14 @@ class SwarmchestrateClient:
  
         # Register response handler
         self.peer.register_message_handler("MSG_SUBMIT_RESPONSE", self._handle_submit_response)
-        self.peer.register_message_handler("MSG_SWARM_ID_RESPONSE", self._handle_swarm_id_response)
+        #self.peer.register_message_handler("MSG_SWARM_ID_RESPONSE", self._handle_swarm_id_response)
+
+        def debug_swarm_id_handler(*args, **kwargs):
+            print("[DEBUG] MSG_SWARM_ID_RESPONSE HANDLER CALLED")
+            print("[DEBUG] args:", args)
+            print("[DEBUG] kwargs:", kwargs)
+
+        self.peer.register_message_handler("MSG_SWARM_ID_RESPONSE", debug_swarm_id_handler)
 
         def on_entered():
             print(f"Connected to hub {hub_host}:{hub_port}")
