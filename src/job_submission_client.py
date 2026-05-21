@@ -13,6 +13,7 @@ import random
 from pathlib import Path
 from itertools import product
 from swchp2pcom import SwchPeer
+from twisted.internet import reactor
  
  
 
@@ -228,6 +229,8 @@ class SwarmchestrateClient:
             print(f"[DEBUG] Job {job_id} submission succeeded")
             self.logger.info(f"Job {job_id} submission succeeded")
             self.peer.leave()
+            if reactor.running:
+                reactor.callLater(0.5, reactor.stop)
 
         self.peer.register_message_handler("MSG_SUBMIT_RESPONSE", _handle_submit_response)
         #self.peer.register_message_handler("MSG_SWARM_ID_RESPONSE", self._handle_swarm_id_response)
