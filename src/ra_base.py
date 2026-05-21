@@ -563,7 +563,7 @@ class ResourceAgent:
                         "message": "Resource offers compiled successfully"
                         }
                 self.peer.send(client_id, "MSG_SUBMIT_RESPONSE", submit_response_message)                
-                return None
+
 
         
 
