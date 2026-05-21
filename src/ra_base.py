@@ -421,6 +421,12 @@ class ResourceAgent:
                 return None
 
 
+
+        #self._delete_job(job_id)
+        CLUSTER_NAME = job_id
+        swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+        swarmchestrate.destroy(CLUSTER_NAME)
+        
         msg_delete_job = {
                     "job_id": job_id,
                     "timestamp": message.get('timestamp'),
@@ -431,11 +437,6 @@ class ResourceAgent:
         for ra_id in all_ras:
             self.peer.send(ra_id, "MSG_DELETE_JOB_BROADCAST", msg_delete_job)
             self.logger.info(f"Broadcasted job deletion request to {ra_id}")
-        #self._delete_job(job_id)
-        CLUSTER_NAME = job_id
-        swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-        swarmchestrate.destroy(CLUSTER_NAME)
-        
         self.logger.info(f"Job {job_id} deleted successfully")
 
 
