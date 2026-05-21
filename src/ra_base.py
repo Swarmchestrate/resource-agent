@@ -228,10 +228,11 @@ class ResourceAgent:
 
     def _handle_delete_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Handle job deletion broadcast from hub RA"""
+        self.logger.info(f"Received job deletion broadcast from hub {peer_id} for job {message.get('job_id')}")
         job_id = message.get('job_id')
         LR_id = message.get('LR_id')
         if LR_id == self.ra_id:
-            self.logger.info(f"Received job deletion broadcast for job {job_id} and this RA is the lead resource, proceeding to delete the cluster")
+            self.logger.info(f"As the lead resource, proceeding to delete the cluster for job {job_id}")
             CLUSTER_NAME = job_id
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             swarmchestrate.destroy(CLUSTER_NAME)
@@ -454,6 +455,18 @@ class ResourceAgent:
         for ra_id in all_ras:
             self.peer.send(ra_id, "MSG_DELETE_JOB_BROADCAST", msg_delete_job)
             self.logger.info(f"Broadcasted job deletion request to {ra_id}")
+    
+        client_id = self.job_clients.get(job_id)
+        if client_id:
+            print("Sending delete response failure message to client:", client_id)
+            delete_response_message = {
+                    "job_id": job_id,
+                    "ra_id": self.ra_id,
+                    "result": "success",
+                    "message": "Job deleted successfully"
+                    }
+            self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)                
+            
         self.logger.info(f"Job {job_id} deleted successfully")
 
 
