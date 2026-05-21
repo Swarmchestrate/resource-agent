@@ -229,7 +229,13 @@ class ResourceAgent:
     def _handle_delete_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Handle job deletion broadcast from hub RA"""
         job_id = message.get('job_id')
-    
+        lead_resource = message.get('lead_resource')
+        if lead_resource == self.ra_id:
+            self.logger.info(f"Received job deletion broadcast for job {job_id} and this RA is the lead resource, proceeding to delete the cluster")
+            CLUSTER_NAME = job_id
+            swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+            swarmchestrate.destroy(CLUSTER_NAME)
+        
         if job_id in self.job_states:
             del self.job_states[job_id]
 
@@ -420,16 +426,10 @@ class ResourceAgent:
                 self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)                
                 return None
 
-
-
-        #self._delete_job(job_id)
-        CLUSTER_NAME = job_id
-        swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-        swarmchestrate.destroy(CLUSTER_NAME)
-        
         msg_delete_job = {
                     "job_id": job_id,
                     "timestamp": message.get('timestamp'),
+                    "lead_resource": self.lead_resource.get(job_id),
                     "hub_ra": self.peer.peer_id
         }
         all_ras = self.peer.find_peers({"peer_type": "RA"})
