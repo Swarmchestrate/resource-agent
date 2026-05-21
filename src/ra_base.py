@@ -229,8 +229,8 @@ class ResourceAgent:
     def _handle_delete_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Handle job deletion broadcast from hub RA"""
         job_id = message.get('job_id')
-        lead_resource = message.get('lead_resource')
-        if lead_resource == self.ra_id:
+        LR_id = message.get('LR_id')
+        if LR_id == self.ra_id:
             self.logger.info(f"Received job deletion broadcast for job {job_id} and this RA is the lead resource, proceeding to delete the cluster")
             CLUSTER_NAME = job_id
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
@@ -426,10 +426,27 @@ class ResourceAgent:
                 self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)                
                 return None
 
+        # Ze: determine the LR_id
+        selected_ms = self.lead_resource.get(job_id)
+        # Get the keys and ensure there is at least one offer
+        offer_keys = list(self.job_offers[job_id][selected_ms].keys())
+        if not offer_keys:
+            print(f"[ERROR] Microservice {selected_ms} has no offers!")
+            return
+            
+        offer_id = offer_keys[0]
+        offer_data = self.job_offers[job_id][selected_ms][offer_id]
+        
+        # Using .get() for production safety
+        ids = offer_data.get("ids", {})
+        LR_id = ids.get("ra_id")
+
+        # Ze: broadcast job deletion since they may allocated the resource, but only the LR needs to delete the cluster, 
+        # other RAs just need to update their capacity registry if they have allocated resource for this job
         msg_delete_job = {
                     "job_id": job_id,
                     "timestamp": message.get('timestamp'),
-                    "lead_resource": self.lead_resource.get(job_id),
+                    "LR_id": LR_id,
                     "hub_ra": self.peer.peer_id
         }
         all_ras = self.peer.find_peers({"peer_type": "RA"})
