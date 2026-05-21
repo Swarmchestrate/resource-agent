@@ -222,11 +222,13 @@ class SwarmchestrateClient:
             if result == "failure":
                 print(f"[ERROR] Job {job_id} submission failed")
                 self.logger.error(f"Job {job_id} submission failed")
-                self.peer.leave()
+                #self.peer.leave()
                 return
 
             print(f"[DEBUG] Job {job_id} submission succeeded")
             self.logger.info(f"Job {job_id} submission succeeded")
+            self.peer.leave()
+
         self.peer.register_message_handler("MSG_SUBMIT_RESPONSE", _handle_submit_response)
         #self.peer.register_message_handler("MSG_SWARM_ID_RESPONSE", self._handle_swarm_id_response)
 
