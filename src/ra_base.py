@@ -301,7 +301,7 @@ class ResourceAgent:
             name = re.sub(r"-+", "-", name).strip("-")
             return name[:63]
         job_id = sanitize_node_name(job_id)
-        
+
         self.job_states[job_id] = {}
         self._update_job_state(job_id, "Pending")
         self.job_clients[job_id] = message.get('client_id')
@@ -316,7 +316,7 @@ class ResourceAgent:
                     "result": "SWARM_ID_ASSIGNED",
                     "message": "SWARM ID assigned successfully, now processing the application submission"
                     }
-            self.peer.send(client_id, "MSG_SWARM_ID_RESPONSE", submit_response_message)        
+            self.peer.send(peer_id, "MSG_SWARM_ID_RESPONSE", submit_response_message)        
         
         ask_yaml = message.get('tosca')
         # initialise application tosca
