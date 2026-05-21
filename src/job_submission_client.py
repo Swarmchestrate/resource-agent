@@ -76,7 +76,7 @@ class SwarmchestrateClient:
             self.peer.leave()
         finally:
             if reactor.running:
-                reactor.callLater(0.5, reactor.stop)
+                reactor.callLater(2, reactor.stop)
 
     def handle_client_request(self, request_path):
         try:
