@@ -411,11 +411,11 @@ class ResourceAgent:
         """Handle job deletion requests"""
         self.logger.info(f"Received submit job deletion request from {peer_id} to delete job {message.get('job_id')}")
         job_id = message.get('job_id')
+        client_id = self.job_clients.get(job_id)
         if job_id not in self.job_offers:
             self.logger.exception(
                     f"Job {job_id} not found for deletion"
                 )
-            client_id = self.job_clients.get(job_id)
             if client_id:
                 print("Sending delete response failure message to client:", client_id)
                 delete_response_message = {
@@ -426,7 +426,16 @@ class ResourceAgent:
                         }
                 self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)                
                 return None
-
+        if client_id:
+            print("Sending delete response failure message to client:", client_id)
+            delete_response_message = {
+                    "job_id": job_id,
+                    "ra_id": self.ra_id,
+                    "result": "success",
+                    "message": "Job deleted successfully"
+                    }
+            self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)                
+            
         # Ze: determine the LR_id
         selected_ms = self.lead_resource.get(job_id)
         # Get the keys and ensure there is at least one offer
@@ -456,17 +465,7 @@ class ResourceAgent:
             self.peer.send(ra_id, "MSG_DELETE_JOB_BROADCAST", msg_delete_job)
             self.logger.info(f"Broadcasted job deletion request to {ra_id}")
     
-        client_id = self.job_clients.get(job_id)
-        if client_id:
-            print("Sending delete response failure message to client:", client_id)
-            delete_response_message = {
-                    "job_id": job_id,
-                    "ra_id": self.ra_id,
-                    "result": "success",
-                    "message": "Job deleted successfully"
-                    }
-            self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)                
-            
+
         self.logger.info(f"Job {job_id} deleted successfully")
 
 
@@ -1133,12 +1132,12 @@ class ResourceAgent:
             print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
             
 			# Ze-TODO: temp_port support, should be replaced by fetching from get_cluster() function
-            ssh_port_test = node_info.get("ssh_port", "22")
-            print(f"[DEBUG] ssh_port_test is {ssh_port_test} \n")
-            ssh_port = 22
-            if self.ra_id == "UST-RA":
-                ssh_port = 10001
-                print(f"[DEBUG] ra_id {self.ra_id} is UST-RA, ssh_port is {ssh_port}\n")
+            ssh_port = node_info.get("ssh_port", "22")
+            print(f"[DEBUG] ssh_port is {ssh_port} \n")
+
+            #if self.ra_id == "UST-RA":
+            #    ssh_port = 10001
+            #    print(f"[DEBUG] ra_id {self.ra_id} is UST-RA, ssh_port is {ssh_port}\n")
           	# general
             ssh_user = node_info.get("ssh_user", "ec2-user")
             
@@ -1534,6 +1533,7 @@ class ResourceAgent:
         
         # general
         ssh_user = node_info.get("ssh_user", "ubuntu")
+        ssh_port = node_info.get("ssh_port", "22")
 
         # edge
         ssh_auth_method = node_info.get("ssh_auth_method", "")
@@ -1612,6 +1612,7 @@ class ResourceAgent:
                     f'"k3s_role": "worker",'
                     f'"k3s_token": "{k3s_token}",'
                     f'"master_ip": "{master_ip}",'
+                    f'"ssh_port": "{ssh_port}",'
                     f'"cluster_name": "{cluster_name}"}}'   
                 )
             worker_node = {
