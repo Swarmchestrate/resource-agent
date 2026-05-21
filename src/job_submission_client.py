@@ -116,7 +116,18 @@ class SwarmchestrateClient:
             metadata={"peer_type": "JOB_CLIENT", "client_id": self.client_id}
         )
 
-        self.peer.register_message_handler("MSG_STATE_INFO", self._handle_query_response)
+        def _handle_query_response(peer_id: str, message: dict[str, Any]):
+            """Handle job status query responses from RA"""
+            print(f"Received job status response from {peer_id}")
+            job_id = message.get('job_id')
+            status = message.get('state')
+            if status == "unknown":
+                print(f"[DEBUG] Job {job_id} not found")
+            else:
+                print(f"[DEBUG] Job {job_id} status: {status}")
+            self.stop_client()
+
+        self.peer.register_message_handler("MSG_STATE_INFO", _handle_query_response)
 
         
         # Process the message as needed
@@ -178,9 +189,9 @@ class SwarmchestrateClient:
 
             if result == "failure":
                 print(f"[ERROR] Job {job_id} deletion failed (not found or already deleted)")
-                self.logger.error(
-                    f"Job {job_id} deletion failed, not found or already deleted"
-                )
+                # self.logger.error(
+                #     f"Job {job_id} deletion failed, not found or already deleted"
+                # )
                 self.stop_client()
                 return
 
@@ -256,7 +267,7 @@ class SwarmchestrateClient:
             if result == "failure":
                 print(f"[ERROR] Job {job_id} submission failed")
                 self.logger.error(f"Job {job_id} submission failed")
-                #self.peer.leave()
+                self.stop_client()
                 return
 
             print(f"[DEBUG] Job {job_id} submission succeeded")
@@ -323,15 +334,7 @@ class SwarmchestrateClient:
 
 
 
-    def _handle_query_response(self, peer_id: str, message: dict[str, Any]):
-        """Handle job status query responses from RA"""
-        print(f"Received job status response from {peer_id}")
-        job_id = message.get('job_id')
-        status = message.get('state')
-        if status == "unknown":
-            print(f"Job {job_id} not found")
-        else:
-            print(f"Job {job_id} status: {status}")
+
 
 def main():
     if len(sys.argv) < 2:
