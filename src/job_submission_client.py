@@ -209,31 +209,30 @@ class SwarmchestrateClient:
         )
  
         # Register response handler
-        def _handle_submit_response(self, peer_id: str, message: dict[str, Any]):
-            """Handle responses from RA"""
+        def _handle_submit_response(peer_id: str, message: dict[str, Any]):
             self.logger.info(f"Received job submit response from {peer_id}")
-            job_id = message.get('job_id')
-            result = message.get('result')
+            job_id = message.get("job_id")
+            result = message.get("result")
+
             if result == "failure":
-                self.logger.error(f"Job {job_id} submission failed"
-                )
+                self.logger.error(f"Job {job_id} submission failed")
                 self.peer.leave()
                 return
-            else:
-                self.logger.info(f"Job {job_id} submission succeeded")
+
+            self.logger.info(f"Job {job_id} submission succeeded")
         self.peer.register_message_handler("MSG_SUBMIT_RESPONSE", _handle_submit_response)
         #self.peer.register_message_handler("MSG_SWARM_ID_RESPONSE", self._handle_swarm_id_response)
 
-        def _handle_swarm_id_response(self, peer_id, message):
-            print("[DEBUG] SWARM ID response received:", message)
-
+        def _handle_swarm_id_response(peer_id: str, message: dict[str, Any]):
+            self.logger.info(f"Received SWARM ID response from {peer_id}")
             swarm_id = message.get("swarm_id")
+
             if not swarm_id:
                 self.logger.error("Failed to receive SWARM ID")
                 return
 
             self.swarm_id = swarm_id
-            self.logger.info(f"Received SWARM ID from {peer_id}: {swarm_id}")
+            self.logger.info(f"Received SWARM ID: {swarm_id}")
 
         self.peer.register_message_handler("MSG_SWARM_ID_RESPONSE", _handle_swarm_id_response)
 
