@@ -295,13 +295,13 @@ class ResourceAgent:
         client_id = message.get('client_id')
         job_id = (self.ra_id + "_" + datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3])
         import re
-
         def sanitize_node_name(name: str) -> str:
             name = name.lower()
             name = re.sub(r"[^a-z0-9-]+", "-", name)
             name = re.sub(r"-+", "-", name).strip("-")
             return name[:63]
         job_id = sanitize_node_name(job_id)
+        
         self.job_states[job_id] = {}
         self._update_job_state(job_id, "Pending")
         self.job_clients[job_id] = message.get('client_id')
