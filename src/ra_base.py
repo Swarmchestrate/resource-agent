@@ -548,6 +548,20 @@ class ResourceAgent:
                         }
                 self.peer.send(client_id, "MSG_SUBMIT_RESPONSE", submit_response_message)                
                 return None
+        else:
+            client_id = self.job_clients.get(job_id)
+            if client_id:
+                print("Sending submit response success message to client:", client_id)
+                submit_response_message = {
+                        "job_id": job_id,
+                        "ra_id": self.ra_id,
+                        "result": "success",
+                        "message": "Resource offers compiled successfully"
+                        }
+                self.peer.send(client_id, "MSG_SUBMIT_RESPONSE", submit_response_message)                
+                return None
+
+        
 
         print("Valid resource combinations found. Selecting lead resource...") 
         # Ze-DONE: randomly select a resource's RA node as LR
