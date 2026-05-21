@@ -550,6 +550,7 @@ class ResourceAgent:
                 return None
         else:
             client_id = self.job_clients.get(job_id)
+            print(f"[DEBUG] send submission success msg to client: {client_id} ")
             if client_id:
                 print("Sending submit response success message to client:", client_id)
                 submit_response_message = {
