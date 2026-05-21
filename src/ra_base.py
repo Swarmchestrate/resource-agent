@@ -71,6 +71,7 @@ class ResourceAgent:
         self.job_states = {} # store the state of each job [job_id]{state: xxx}
         self.job_responses = {} # store the resource responses from RAs for each job [job_id][ra_id]
         self.job_clients = {} # store the client_id for each job [job_id]
+        self.job_capreg_allocated = {} # store the allocated job IDs for each job [job_id]
 
         self.master_info = {} # store the master info for each job [job_id]{ip, port, k3s_token}
         self.job_offers = {} # job_offer stores the offer that fulfills a job request [job_id][]
@@ -228,10 +229,6 @@ class ResourceAgent:
     def _handle_delete_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Handle job deletion broadcast from hub RA"""
         job_id = message.get('job_id')
-        offers_all = self.capreg.resource_offer_query_all(job_id)
-        self.capreg.resources_and_offers_destroy_all(job_id)
-        self.capreg.dump_capacity_registry_info()
-    
     
         if job_id in self.job_states:
             del self.job_states[job_id]
@@ -250,6 +247,12 @@ class ResourceAgent:
 
         if job_id in self.lead_resource:
             del self.lead_resource[job_id]
+
+        if job_id in self.job_capreg_allocated:
+            offers_all = self.capreg.resource_offer_query_all(job_id)
+            self.capreg.resources_and_offers_destroy_all(job_id)
+            self.capreg.dump_capacity_registry_info()
+            del self.job_capreg_allocated[job_id]
 
 
     def _handle_job_status_query(self, peer_id: str, message: Dict[str, Any]):
@@ -550,7 +553,7 @@ class ResourceAgent:
                 return None
         else:
             client_id = self.job_clients.get(job_id)
-            print(f"[DEBUG] send submission success msg to client: {client_id} ")
+            print(f"[DEBUG] send submission success msg to client: {client_id}")
             if client_id:
                 print("Sending submit response success message to client:", client_id)
                 submit_response_message = {
@@ -1044,6 +1047,8 @@ class ResourceAgent:
         tosca = message.get('tosca', {})
         print(f"[DEBUG] information from instance node name is  {node_name}, {cloud}")
 
+        self.job_capreg_allocated[job_id] = True # set the flag to indicate that the resources for this job have been allocated in the capacity registry, this is used to decide whether we need to release the resource offer when the job is deleted
+
         offer_info = message.get('offer_info', {})
         print(f"offer_info received by LR is {offer_info}")
             # Get the offer info of the resource(s) to deploy
@@ -1449,6 +1454,7 @@ class ResourceAgent:
         """Process create resource request from LRA"""
         self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
         job_id = message.get('job_id')
+        self.job_capreg_allocated[job_id] = True  # Mark that we've allocated resources for this job
         instance = message.get('instance', {})
         offer_data = next(iter(instance["resource"].values()))
     
