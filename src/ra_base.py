@@ -934,7 +934,10 @@ class ResourceAgent:
         # 3) populate the qos_priority template
 
         qos_data = self.tosca[job_id].get_qos()
-        print(f"[DEBUG] qos_data extracted from TOSCA is {qos_data}")
+        print(f"[DEBUG] qos_data extracted from raw TOSCA is {qos_data}")
+        sat = Sardou(self.tosca[job_id])
+        qos_data = sat.get_qos()
+        print(f"[DEBUG] qos_data extracted from sardou loaded TOSCA is {qos_data}")
         qos_priority = get_qos_priorities(qos_data)
         print(f"qos_priority extracted from TOSCA is {qos_priority}")
         reliability_list = []
