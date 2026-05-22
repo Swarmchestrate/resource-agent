@@ -935,29 +935,26 @@ class ResourceAgent:
 
         qos_data = self.tosca[job_id].get_qos()
         print(f"[DEBUG] qos_data extracted from raw TOSCA is {qos_data}")
-        #sat = Sardou(self.tosca[job_id])
-        #qos_data = sat.get_qos()
-        #print(f"[DEBUG] qos_data extracted from sardou loaded TOSCA is {qos_data}")
         qos_priority = get_qos_priorities(qos_data)
         print(f"[DEBUG] qos_priority extracted from TOSCA is {qos_priority}")
+        
         reliability_list = []
         latency_list = []
         energy_list = []
         bandwidth_list = []
         price_list = []
-                # Change 'for combination in valid_combinations:' to:
+        
+        # Ze: for each combination we calculate its qos
         for combination_data in valid_combinations.values():
             total_energy = 0
             total_bandwidth = 0
             total_price = 0
             
-            # Since your JSON is nested: ms_id -> offer_id -> data
+            # Ze: we sum the total qos consumption of each combination
             for ms_id, offers in combination_data.items():
                 for offer_id, resource_data in offers.items():
-                    # Access the 'characteristics' dictionary from your JSON
                     chars = resource_data.get('characteristics', {})
                     
-                    # Match the key names exactly as they appear in your JSON (with dots)
                     total_energy += chars.get('energy.consumption', 0)
                     total_bandwidth += int(chars.get('host.bandwidth', 0))
                     total_price += chars.get('pricing.cost', 0)
@@ -965,6 +962,7 @@ class ResourceAgent:
             energy_list.append(total_energy)
             bandwidth_list.append(total_bandwidth)
             price_list.append(total_price)
+            # Ze-TODO: here we assume reliability and latency are not present in RA's CDT
             reliability_list.append(1) 
             latency_list.append(1)
 
@@ -982,7 +980,7 @@ class ResourceAgent:
         with open("rank-format.json", "w") as f:
             json.dump(offer_data, f, indent=2)
 
-        # Call ranking function
+        # Ze: AI ranking algorithm takes qos_priority and qos values of each offer combination as input.
         evaluator = OfferEvaluator(offer_data)
         optimal_index = evaluator.rank_offers_without_reliability()
         # Return first item if optimal_index is not empty
