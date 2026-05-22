@@ -1213,7 +1213,7 @@ class ResourceAgent:
                 f'"resource_name":"{ms_id}",'
                 f'"ssh_user": "{ssh_user}",'
                 f'"ssh_key": "{ssh_key_path}",'
-                f'"ssh_auth_method": "key",'
+                f'"ssh_auth_method": "{ssh_auth_method}",'
                 f'"ssh_port": "{ssh_port}",'
 				f'"k3s_role": "{k3s_role}"}}'
             )
@@ -1610,7 +1610,7 @@ class ResourceAgent:
                     f'"resource_name":"{node_name}",'
                     f'"ssh_user": "ec2-user",'
                     f'"ssh_key": "{ssh_key_path}",'
-                    f'"ssh_auth_method": "key",'
+                    f'"ssh_auth_method": "{ssh_auth_method}",'
                     f'"k3s_role": "worker",'
                     f'"k3s_token": "{k3s_token}",'
                     f'"master_ip": "{master_ip}",'
