@@ -25,26 +25,39 @@ def dict_to_yaml(data: dict, filename: str):
         yaml.dump(data, f, sort_keys=False, indent=2)
 
 
-def extract_qos_priorities(qos_list):
-    """
-    Convert a list of TOSCA QoS policies into a flat qos_priority dict.
-
-    Args:
-        qos_list (list): QoS policy list from get_qos()
-
-    Returns:
-        dict: Mapping from QoS type (normalized) to priority value.
-    """
+def extract_qos_priorities(qos_data):
     qos_priority = {}
 
-    for qos in qos_list:
-        # each qos is like {'energy': {...}} or {'cost': {...}}
-        for key, val in qos.items():
-            priority = val.get("properties", {}).get("priority", None)
-            if priority is not None:
-                # normalize key names (cost → price)
-                normalized_key = "price" if key == "cost" else key
-                qos_priority[normalized_key] = priority
+    if not qos_data:
+        return qos_priority
+
+    # Case 1: qos_data is already a dict:
+    # {"bandwidth": {...}, "cost": {...}, "energy": {...}}
+    if isinstance(qos_data, dict):
+        iterator = qos_data.items()
+
+    # Case 2: qos_data is a list:
+    # [{"bandwidth": {...}}, {"cost": {...}}]
+    elif isinstance(qos_data, list):
+        iterator = []
+        for item in qos_data:
+            if isinstance(item, dict):
+                iterator.extend(item.items())
+    else:
+        print(f"[WARNING] Unexpected QoS format: {type(qos_data)}")
+        return qos_priority
+
+    for key, val in iterator:
+        if not isinstance(val, dict):
+            continue
+
+        priority = val.get("priority")
+        if priority is None:
+            priority = val.get("properties", {}).get("priority")
+
+        if priority is not None:
+            normalized_key = "price" if key == "cost" else key
+            qos_priority[normalized_key] = priority
 
     return qos_priority
 
