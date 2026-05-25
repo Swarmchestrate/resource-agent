@@ -92,6 +92,9 @@ service_template:
 #            - $equal:
 #              - $get_property: [SELF, TARGET, CAPABILITY, resource, type]
 #              - edge
+#            - $equal:
+#              - $get_property: [SELF, TARGET, CAPABILITY, resource, capacity-provider]
+#              - ust/fuelics/innorenew
 
   policies:
   - stressng_colocation:
