@@ -13,6 +13,7 @@ spec:
         app: swarm-agent
     spec:
       serviceAccountName: swarm-agent
+      automountServiceAccountToken: true
       containers:
       - name: swarm-agent
         #image: zewang42/swarm-agent-7.0:amd
