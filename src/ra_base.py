@@ -1608,7 +1608,7 @@ class ResourceAgent:
                     f'"edge_device_ip": "{edge_device_ip}",'
                     f'"ha": false,'
                     f'"resource_name":"{node_name}",'
-                    f'"ssh_user": "ec2-user",'
+                    f'"ssh_user": "{ssh_user}",'
                     f'"ssh_key": "{ssh_key_path}",'
                     f'"ssh_auth_method": "{ssh_auth_method}",'
                     f'"k3s_role": "worker",'
