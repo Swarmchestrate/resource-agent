@@ -25,6 +25,29 @@ def dict_to_yaml(data: dict, filename: str):
         yaml.dump(data, f, sort_keys=False, indent=2)
 
 
+
+def get_resource_capacity(capacity_config_path, res_id):
+    with open(capacity_config_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    node_types = config.get("node_types", {})
+
+    resource_type = node_types.get(res_id)
+    if not resource_type:
+        return None
+
+    host_props = (
+        resource_type
+        .get("capabilities", {})
+        .get("host", {})
+        .get("properties", {})
+    )
+
+    cpu = host_props.get("num-cpus", {}).get("default", 0)
+    memory = host_props.get("mem-size", {}).get("default", 0)
+
+    return cpu, memory
+
 def extract_qos_priorities(qos_data):
     qos_priority = {}
 
