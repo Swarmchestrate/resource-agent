@@ -645,7 +645,7 @@ class ResourceAgent:
 
         if demonsrator_ra == "UST-RA":
             self.lead_resource[job_id] = "micro-processing"
-		else:
+        else:
             self.lead_resource[job_id] = random.choice(valid) if valid else None
         # 1. Look inside the nested offers to find the specific RA ID
         # This correctly handles: job_offers[job_id][ms_id][offer_id]['ids']['ra_id']
