@@ -629,106 +629,109 @@ class ResourceAgent:
         # Ze-DONE: for demo purpose, we hardcode the lead resource to be 'ra-aws-cloud-us'
         #self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
         
-        # import random
-        # # 1. Look inside the nested offer to see if it has an ra_id
-        # valid = []
-
-        # # for ms_id, offers in self.job_offers[job_id].items():
-        # #     # Get the first offer_id in this service
-        # #     for offer_id, data in offers.items():
-        # #         if data.get("ids", {}).get("ra_id"):
-        # #             valid.append(ms_id)
-        # #             break # Move to next microservice
-
-        # # 2. Pick a Lead Resource
-
-        
-        # self.lead_resource[job_id] = random.choice(valid) if valid else None
-        # # 1. Look inside the nested offers to find the specific RA ID
-        # # This correctly handles: job_offers[job_id][ms_id][offer_id]['ids']['ra_id']
-        # #self.lead_resource[job_id] = next(
-        # #    (ms_id for ms_id, offers in self.job_offers[job_id].items() 
-        # #    #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-cloud-us' for data in offers.values())), 
-        # #    #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-edge-uk' for data in offers.values())), 
-        # #    if any(data.get('ids', {}).get('ra_id') == 'ra-sztaki-cloud-hu' for data in offers.values())), 
-        # #    None
-        # #)
-
-
-        # #print(f"[DEBUG] lead_resource for job {job_id} is {self.lead_resource[job_id]}")
-        # # 3. Safely extract the details from the chosen Lead Resource
-        # selected_ms = self.lead_resource[job_id]
-        # print(f"[DEBUG] selected ms is {selected_ms}")
-
-        # if selected_ms:
-        #     # Get the keys and ensure there is at least one offer
-        #     offer_keys = list(self.job_offers[job_id][selected_ms].keys())
-        #     if not offer_keys:
-        #         print(f"[ERROR] Microservice {selected_ms} has no offers!")
-        #         return
-               
-        #     offer_id = offer_keys[0]
-        #     offer_data = self.job_offers[job_id][selected_ms][offer_id]
-            
-        #     # Using .get() for production safety
-        #     ids = offer_data.get("ids", {})
-        #     LR_id = ids.get("ra_id")
-        #     provider = ids.get("provider_id")
-        #     instance_type = ids.get("res_id") 
-            
-        #     print(f"[DEBUG] Lead Resource selected: {selected_ms} (RA: {LR_id})")
-        # else:
-        #     print("[ERROR] No valid lead resource found!")
-        #     return
-
-        # Ze-DONE: New approach to select the best offer based on resource capacity
+        import random
+        # 1. Look inside the nested offer to see if it has an ra_id
         valid = []
+        demonsrator_ra = None
         for ms_id, offers in self.job_offers[job_id].items():
+            # Get the first offer_id in this service
             for offer_id, data in offers.items():
-                ids = data.get("ids", {})
+                if data.get("ids", {}).get("ra_id"):
+                    valid.append(ms_id)
+                    demonsrator_ra = data.get("ids", {}).get("ra_id")
+                    break # Move to next microservice
 
-                ra_id = ids.get("ra_id")
-                res_id = ids.get("res_id")
+        # 2. Pick a Lead Resource
 
-                if not ra_id or not res_id:
-                    continue
+        if demonsrator_ra == "UST-RA":
+            self.lead_resource[job_id] = "micro-processing"
+		else:
+            self.lead_resource[job_id] = random.choice(valid) if valid else None
+        # 1. Look inside the nested offers to find the specific RA ID
+        # This correctly handles: job_offers[job_id][ms_id][offer_id]['ids']['ra_id']
+        #self.lead_resource[job_id] = next(
+        #    (ms_id for ms_id, offers in self.job_offers[job_id].items() 
+        #    #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-cloud-us' for data in offers.values())), 
+        #    #if any(data.get('ids', {}).get('ra_id') == 'ra-aws-edge-uk' for data in offers.values())), 
+        #    if any(data.get('ids', {}).get('ra_id') == 'ra-sztaki-cloud-hu' for data in offers.values())), 
+        #    None
+        #)
 
-                capacity = self._get_resource_capacity(res_id)
 
-                if capacity is None:
-                    print(f"[WARN] Resource type {res_id} not found in capacity-config.yaml")
-                    continue
+        #print(f"[DEBUG] lead_resource for job {job_id} is {self.lead_resource[job_id]}")
+        # 3. Safely extract the details from the chosen Lead Resource
+        selected_ms = self.lead_resource[job_id]
+        print(f"[DEBUG] selected ms is {selected_ms}")
 
-                valid.append({
-                    "ms_id": ms_id,
-                    "offer_id": offer_id,
-                    "ra_id": ra_id,
-                    "res_id": res_id,
-                    "provider_id": ids.get("provider_id"),
-                    "capacity": capacity,
-                })
-
-        best = max(valid, key=lambda x: x["capacity"]) if valid else None
-
-        if best:
-            self.lead_resource[job_id] = best["ms_id"]
-
-            selected_ms = best["ms_id"]
-            offer_id = best["offer_id"]
+        if selected_ms:
+            # Get the keys and ensure there is at least one offer
+            offer_keys = list(self.job_offers[job_id][selected_ms].keys())
+            if not offer_keys:
+                print(f"[ERROR] Microservice {selected_ms} has no offers!")
+                return
+               
+            offer_id = offer_keys[0]
             offer_data = self.job_offers[job_id][selected_ms][offer_id]
-
-            LR_id = best["ra_id"]
-            provider = best["provider_id"]
-            instance_type = best["res_id"]
-
-            print(f"[DEBUG] selected ms is {selected_ms}")
-            print(f"[DEBUG] selected offer is {offer_id}")
-            print(f"[DEBUG] selected res_id is {instance_type}")
-            print(f"[DEBUG] selected capacity is {best['capacity']}")
+            
+            # Using .get() for production safety
+            ids = offer_data.get("ids", {})
+            LR_id = ids.get("ra_id")
+            provider = ids.get("provider_id")
+            instance_type = ids.get("res_id") 
+            
+            print(f"[DEBUG] Lead Resource selected: {selected_ms} (RA: {LR_id})")
         else:
-            self.lead_resource[job_id] = None
-            print(f"[ERROR] No valid lead resource found for job {job_id}")
+            print("[ERROR] No valid lead resource found!")
             return
+
+        # # Ze-DONE: New approach to select the best offer based on resource capacity
+        # valid = []
+        # for ms_id, offers in self.job_offers[job_id].items():
+        #     for offer_id, data in offers.items():
+        #         ids = data.get("ids", {})
+
+        #         ra_id = ids.get("ra_id")
+        #         res_id = ids.get("res_id")
+
+        #         if not ra_id or not res_id:
+        #             continue
+
+        #         capacity = self._get_resource_capacity(res_id)
+
+        #         if capacity is None:
+        #             print(f"[WARN] Resource type {res_id} not found in capacity-config.yaml")
+        #             continue
+
+        #         valid.append({
+        #             "ms_id": ms_id,
+        #             "offer_id": offer_id,
+        #             "ra_id": ra_id,
+        #             "res_id": res_id,
+        #             "provider_id": ids.get("provider_id"),
+        #             "capacity": capacity,
+        #         })
+
+        # best = max(valid, key=lambda x: x["capacity"]) if valid else None
+
+        # if best:
+        #     self.lead_resource[job_id] = best["ms_id"]
+
+        #     selected_ms = best["ms_id"]
+        #     offer_id = best["offer_id"]
+        #     offer_data = self.job_offers[job_id][selected_ms][offer_id]
+
+        #     LR_id = best["ra_id"]
+        #     provider = best["provider_id"]
+        #     instance_type = best["res_id"]
+
+        #     print(f"[DEBUG] selected ms is {selected_ms}")
+        #     print(f"[DEBUG] selected offer is {offer_id}")
+        #     print(f"[DEBUG] selected res_id is {instance_type}")
+        #     print(f"[DEBUG] selected capacity is {best['capacity']}")
+        # else:
+        #     self.lead_resource[job_id] = None
+        #     print(f"[ERROR] No valid lead resource found for job {job_id}")
+        #     return
 
 
 
