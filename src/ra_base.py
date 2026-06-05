@@ -1232,6 +1232,8 @@ class ResourceAgent:
             ssh_auth_method = node_info.get("ssh_auth_method", "")
             edge_device_ip = node_info.get("edge_device_ip", "")
             ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
+            
+            internal_ip = node_info.get("internal_ip", "")
 
             # aws
             aws_instance_type = node_info.get("instance_type", "")
@@ -1329,7 +1331,13 @@ class ResourceAgent:
             cluster_name = outputs.get("cluster_name")
             master_ip = outputs.get("master_ip")
 
-            print(f"[DEBUG] master ip is {master_ip}")
+            # Ze-TODO:
+            # Maybe we have master_ip for UST. 
+            if internal_ip:
+                master_ip = internal_ip
+                print(f"[DEBUG] master ip {master_ip} is from internal_ip")
+            else:
+                print(f"[DEBUG] master ip {master_ip} is not from internal_ip")
 
             
             # Ze-done: Prepare configmap of tosca file for SA
