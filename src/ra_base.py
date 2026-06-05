@@ -1332,20 +1332,6 @@ class ResourceAgent:
             cluster_name = outputs.get("cluster_name")
             master_ip = outputs.get("master_ip")
 
-            # Ze-DONE: master_ip will always be a public ip
-            # for the edge case, if edge_device_local_ip is present, this means its public ip does not support ports
-            # to form a k3s cluster, we need to use the local ip
-            # Ze-TODO: however, what if an edge is the master, but cloud is the worker and is not in the edge's local network?
-            # We must know this is only a workaround for a single case: 
-            #   1) the worker node and the master node are in the same local network
-            # This won't work in the cases like:
-            #   1) the worker node is in other networks, could be cloud or edge of other demonstrators
-            #   2) the master node is in a private cloud, in this case we need cloud_device_local_ip as well
-            if edge_device_local_ip:
-                master_ip = edge_device_local_ip
-                print(f"[DEBUG] master ip {master_ip} is from edge_device_local_ip")
-            else:
-                print(f"[DEBUG] master ip {master_ip} is not from edge_device_local_ip")
 
             
             # Ze-done: Prepare configmap of tosca file for SA
@@ -1471,6 +1457,20 @@ class ResourceAgent:
             ssh_port=cfg["ssh_port"],
             ssh_user=cfg["ssh_user"]
             ) 
+            # Ze-DONE: master_ip will always be a public ip
+            # for the edge case, if edge_device_local_ip is present, this means its public ip does not support ports
+            # to form a k3s cluster, we need to use the local ip
+            # Ze-TODO: however, what if an edge is the master, but cloud is the worker and is not in the edge's local network?
+            # We must know this is only a workaround for a single case: 
+            #   1) the worker node and the master node are in the same local network
+            # This won't work in the cases like:
+            #   1) the worker node is in other networks, could be cloud or edge of other demonstrators
+            #   2) the master node is in a private cloud, in this case we need cloud_device_local_ip as well
+            if edge_device_local_ip:
+                master_ip = edge_device_local_ip
+                print(f"[DEBUG] master ip before sending master_info {master_ip} is from edge_device_local_ip")
+            else:
+                print(f"[DEBUG] master ip before sending master_info {master_ip} is not from edge_device_local_ip")
 
             # Ze: send k3s master info back to the hub RA, so that other RAs can create worker nodes and join the cluster
             msg_master_info = {
