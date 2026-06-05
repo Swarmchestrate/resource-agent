@@ -1230,10 +1230,11 @@ class ResourceAgent:
             # resource specific configurations for cluster builder's iuputs
             # edge
             ssh_auth_method = node_info.get("ssh_auth_method", "")
+            # Ze: This ip is for RA to talk with the edge device
             edge_device_ip = node_info.get("edge_device_ip", "")
             ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
-            
-            internal_ip = node_info.get("internal_ip", "")
+            # Ze: This ip is for edge devices to talk with each other
+            edge_device_local_ip = node_info.get("edge_device_local_ip", "")
 
             # aws
             aws_instance_type = node_info.get("instance_type", "")
@@ -1331,13 +1332,20 @@ class ResourceAgent:
             cluster_name = outputs.get("cluster_name")
             master_ip = outputs.get("master_ip")
 
-            # Ze-TODO:
-            # Maybe we have master_ip for UST. 
-            if internal_ip:
-                master_ip = internal_ip
-                print(f"[DEBUG] master ip {master_ip} is from internal_ip")
+            # Ze-DONE: master_ip will always be a public ip
+            # for the edge case, if edge_device_local_ip is present, this means its public ip does not support ports
+            # to form a k3s cluster, we need to use the local ip
+            # Ze-TODO: however, what if an edge is the master, but cloud is the worker and is not in the edge's local network?
+            # We must know this is only a workaround for a single case: 
+            #   1) the worker node and the master node are in the same local network
+            # This won't work in the cases like:
+            #   1) the worker node is in other networks, could be cloud or edge of other demonstrators
+            #   2) the master node is in a private cloud, in this case we need cloud_device_local_ip as well
+            if edge_device_local_ip:
+                master_ip = edge_device_local_ip
+                print(f"[DEBUG] master ip {master_ip} is from edge_device_local_ip")
             else:
-                print(f"[DEBUG] master ip {master_ip} is not from internal_ip")
+                print(f"[DEBUG] master ip {master_ip} is not from edge_device_local_ip")
 
             
             # Ze-done: Prepare configmap of tosca file for SA
