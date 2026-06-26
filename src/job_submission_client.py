@@ -94,8 +94,12 @@ class SwarmchestrateClient:
                 return self.submit_job(tosca_path, hub_host, hub_port, gw_RA_id)
             elif request_type == 'delete':
                 return self.delete_job(job_id, hub_host, hub_port, gw_RA_id)
+            elif request_type == 'delete_all':
+                return self.delete_job_all(job_id, hub_host, hub_port, gw_RA_id)
             elif request_type == 'query':
                 return self.get_job_status(job_id, hub_host, hub_port, gw_RA_id)
+            elif request_type == 'query_all':
+                return self.get_job_status_all(job_id, hub_host, hub_port, gw_RA_id)
             else:
                 print(f"Unknown request type: {request_type}")
                 return False
@@ -233,7 +237,81 @@ class SwarmchestrateClient:
         except Exception as e:
             self.logger.error(f"Failed to connect: {e}")
             return False
-        
+            
+            
+            
+    def delete_job_all(self, job_id, hub_host="", hub_port=5000, gw_RA_id=""):
+        """Delete all jobs from RA network via hub"""
+        print("Swarmchestrate Job Deletion Client")
+        print("=" * 60)
+ 
+        # Initialize P2P client
+        self.peer = SwchPeer(
+            peer_id=self.client_id,
+            enable_rejoin=False,
+            metadata={"peer_type": "JOB_CLIENT", "client_id": self.client_id}
+        )
+
+        def _handle_delete_all_response(peer_id: str, message: dict[str, Any]):
+            """Handle responses from RA"""
+            print("[DEBUG] MSG_DELETE_ALL_RESPONSE received")
+            print("[DEBUG] peer_id:", peer_id)
+            print("[DEBUG] message:", message)
+
+            self.logger.info(f"Received job delete all response from {peer_id}")
+
+            job_id = message.get("job_id")
+            result = message.get("result")
+
+            # Ze-TODO: should return the exact job id if exists
+            if result == "failure":
+                print(f"[ERROR] Job deletion failed (not found or already deleted)")
+                # self.logger.error(
+                #     f"Job {job_id} deletion failed, not found or already deleted"
+                # )
+                self.stop_client()
+                return
+
+            print(f"[DEBUG] Jobs are all deleted")
+            self.logger.info(f"Job deletion all succeeded")
+
+            self.stop_client()
+
+        self.peer.register_message_handler("MSG_DELETE_ALL_RESPONSE", _handle_delete_all_response)
+
+        def on_entered():
+            print(f"Connected to hub {hub_host}:{hub_port}")
+
+            # Find Gateway RA
+            hub_ras = self.peer.find_peers({"peer_type": "RA", "ra_id": gw_RA_id})
+            if not hub_ras:
+                print("Gateway RA {}", {gw_RA_id}, "} not found!")
+                return
+ 
+            hub_ra_id = hub_ras[0]
+            print(f"Connected to hub: {hub_ra_id}")
+
+            # Create job deletion message
+            delete_message = {
+                "job_id": job_id,
+                "client_id": self.client_id,
+                "timestamp": time.time(),
+                "action": "delete_job_all"
+            }
+ 
+            print("Sending request to delete all jobs to the selected RA...")
+            self.peer.send(hub_ra_id, "MSG_JOB_DELETE_ALL", delete_message)
+            print("All Job deletion request submitted.")
+ 
+        try:
+            self.peer.enter(hub_host, hub_port).addCallback(lambda _: on_entered())
+            self.peer.start()
+ 
+        except Exception as e:
+            self.logger.error(f"Failed to connect: {e}")
+            return False
+    
+    
     def submit_job(self, tosca_path, hub_host="", hub_port=5000, gw_RA_id=""):
         """Submit job to RA network via hub"""
         ask_data = self.load_tosca(tosca_path)
@@ -358,6 +436,8 @@ request_type:
  1. submit(tosca_path): submit a job's tosca
  2. delete(job_id): delete a job's deployment
  3. query(job_id): query the state of a job: deploying, deployed, failed, terminated, none
+ 4. delete_all: delete all jobs
+ 5. query_all: query the states of all jobs
 "
 
 job_id:

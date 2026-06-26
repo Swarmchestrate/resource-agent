@@ -243,6 +243,7 @@ class ResourceAgent:
         self.peer.register_message_handler("MSG_HEARTBEAT", self._handle_heartbeat)
         self.peer.register_message_handler("MSG_JOB_SUBMIT", self._handle_job_submit)
         self.peer.register_message_handler("MSG_JOB_DELETE", self._handle_job_delete)
+        self.peer.register_message_handler("MSG_JOB_DELETE_ALL", self._handle_job_delete_all)
         self.peer.register_message_handler("MSG_JOB_BROADCAST", self._handle_job_broadcast)
         self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
         self.peer.register_message_handler("MSG_SELECTED_OFFER", self._handle_selected_offer)
@@ -453,16 +454,16 @@ class ResourceAgent:
                         }
                 self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)
                 return None
-        if client_id:
-            print("Sending delete response failure message to client:", client_id)
-            delete_response_message = {
-                    "job_id": job_id,
-                    "ra_id": self.ra_id,
-                    "result": "success",
-                    "message": "Job deleted successfully"
-                    }
-            self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)
-            
+#        if client_id:
+#            print("Sending delete response failure message to client:", client_id)
+#            delete_response_message = {
+#                    "job_id": job_id,
+#                    "ra_id": self.ra_id,
+#                    "result": "success",
+#                    "message": "Job deleted successfully"
+#                    }
+#            self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)
+#            
         # Ze: determine the LR_id
         selected_ms = self.lead_resource.get(job_id)
         # Get the keys and ensure there is at least one offer
@@ -495,6 +496,94 @@ class ResourceAgent:
 
         self.logger.info(f"Job {job_id} deleted successfully")
 
+    # Ze-TODO: to check the functionality of a lead resource hosts multiple jobs
+    def _handle_job_delete_all(self, peer_id: str, message: Dict[str, Any]):
+        """Handle request to delete all jobs."""
+
+        self.logger.info(
+            f"Received job deletion all request from {peer_id} to delete all jobs"
+        )
+
+        # Get all job IDs from lead_resource
+        job_ids = list(self.lead_resource.keys())
+
+        if not job_ids:
+            self.logger.info("No jobs found to delete")
+            return
+
+        all_ras = self.peer.find_peers({"peer_type": "RA"})
+
+        # Include this RA itself and avoid duplicates
+        all_ras = list(set(all_ras + [self.ra_id]))
+
+        for job_id in job_ids:
+            client_id = self.job_clients.get(job_id)
+
+            if job_id not in self.job_offers:
+                self.logger.error(f"Job {job_id} not found in job_offers for deletion")
+
+                if client_id:
+                    delete_response_message = {
+                        "job_id": job_id,
+                        "ra_id": self.ra_id,
+                        "result": "failure",
+                        "message": "Failed to delete job, job not found",
+                    }
+                    self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)
+
+                continue
+
+            selected_ms = self.lead_resource.get(job_id)
+
+            if selected_ms is None:
+                self.logger.error(f"No lead resource found for job {job_id}")
+                continue
+
+            offers_for_ms = self.job_offers.get(job_id, {}).get(selected_ms, {})
+
+            if not offers_for_ms:
+                self.logger.error(
+                    f"Microservice {selected_ms} has no offers for job {job_id}"
+                )
+                continue
+
+            offer_id = next(iter(offers_for_ms))
+            offer_data = offers_for_ms[offer_id]
+
+            ids = offer_data.get("ids", {})
+            LR_id = ids.get("ra_id")
+
+            if LR_id is None:
+                self.logger.error(f"No LR_id found for job {job_id}")
+                continue
+
+            msg_delete_job = {
+                "job_id": job_id,
+                "timestamp": message.get("timestamp"),
+                "LR_id": LR_id,
+                "hub_ra": self.peer.peer_id,
+            }
+
+            for ra_id in all_ras:
+                self.peer.send(ra_id, "MSG_DELETE_JOB_BROADCAST", msg_delete_job)
+                self.logger.info(
+                    f"Broadcasted deletion request for job {job_id} to RA {ra_id}"
+                )
+
+            self.logger.info(
+                f"Job {job_id} deletion broadcast completed successfully, LR_id={LR_id}"
+            )
+
+            if client_id:
+                delete_response_message = {
+                    "job_id": job_id,
+                    "ra_id": self.ra_id,
+                    "result": "success",
+                    "message": "Job deletion request broadcast successfully",
+                }
+                self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)
+
+        self.logger.info("All job deletion requests have been processed")
 
     def _handle_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Handle job broadcast from hub RA"""
