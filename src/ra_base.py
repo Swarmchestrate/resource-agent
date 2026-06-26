@@ -238,6 +238,7 @@ class ResourceAgent:
     def _register_message_handlers(self):
         """Register handlers for different message types"""
         self.peer.register_message_handler("MSG_JOB_STATUS_QUERY", self._handle_job_status_query)
+        self.peer.register_message_handler("MSG_JOB_STATUS_QUERY_ALL", self._handle_job_status_query_all)
     #    self.peer.register_message_handler("MSG_GETSTATE", self._handle_getstate)
         self.peer.register_message_handler("MSG_RESOURCE_QUERY", self._handle_resource_query)
         self.peer.register_message_handler("MSG_HEARTBEAT", self._handle_heartbeat)
@@ -303,6 +304,45 @@ class ResourceAgent:
         }
         self.peer.send(peer_id, "MSG_STATE_INFO", response)
         self.logger.info(f"Sent job status for {job_id} to {peer_id}")
+
+    # Ze-TODO: verify the implementation
+    def _handle_job_status_query_all(self, peer_id: str, message: Dict[str, Any]):
+        """Handle all job status query requests."""
+
+        self.logger.info(f"Received job status query all from {peer_id}")
+
+        # 1) List all job IDs from self.job_states
+        job_ids = list(self.job_states.keys())
+
+        if not job_ids:
+            response = {
+                "job_id": "none",
+                "ra_id": self.ra_id,
+                "state": "no_jobs",
+                "resources_available": True,
+                "queue_length": 0,
+            }
+            self.peer.send(peer_id, "MSG_STATE_INFO", response)
+            self.logger.info(f"No jobs found. Sent empty status response to {peer_id}")
+            return
+
+        # 2) Send status of each job back
+        for job_id in job_ids:
+            job_state = self.job_states.get(job_id, {})
+
+            response = {
+                "job_id": job_id,
+                "ra_id": self.ra_id,
+                "state": job_state.get("state", "unknown"),
+                "resources_available": True,
+                "queue_length": 0,
+            }
+
+            self.peer.send(peer_id, "MSG_STATE_INFO", response)
+            self.logger.info(f"Sent job status for {job_id} to {peer_id}")
+
+        self.logger.info(f"Sent status for {len(job_ids)} jobs to {peer_id}")
+        
 
     def _handle_resource_query(self, peer_id: str, message: Dict[str, Any]):
         """Handle resource availability queries"""

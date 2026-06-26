@@ -95,11 +95,11 @@ class SwarmchestrateClient:
             elif request_type == 'delete':
                 return self.delete_job(job_id, hub_host, hub_port, gw_RA_id)
             elif request_type == 'delete_all':
-                return self.delete_job_all(job_id, hub_host, hub_port, gw_RA_id)
+                return self.delete_job_all(hub_host, hub_port, gw_RA_id)
             elif request_type == 'query':
                 return self.get_job_status(job_id, hub_host, hub_port, gw_RA_id)
             elif request_type == 'query_all':
-                return self.get_job_status_all(job_id, hub_host, hub_port, gw_RA_id)
+                return self.get_job_status_all(hub_host, hub_port, gw_RA_id)
             else:
                 print(f"Unknown request type: {request_type}")
                 return False
@@ -107,6 +107,67 @@ class SwarmchestrateClient:
         except Exception as e:
             print(f"Failed to handle client request: {e}")
             return False
+
+    def get_job_status_all(self, hub_host="", hub_port=5000, gw_RA_id=""):
+        """Query job status from RA network via hub"""
+        print("Swarmchestrate Job Status Query Client")
+        print("=" * 60)
+ 
+        # Initialize P2P client
+        self.peer = SwchPeer(
+            peer_id=self.client_id,
+            enable_rejoin=False,
+            metadata={"peer_type": "JOB_CLIENT", "client_id": self.client_id}
+        )
+
+        def _handle_query_response(peer_id: str, message: dict[str, Any]):
+            """Handle job status query responses from RA"""
+            print(f"Received job status response from {peer_id}")
+            job_id = message.get('job_id')
+            status = message.get('state')
+            if status == "unknown":
+                print(f"[DEBUG] Job {job_id} not found")
+            else:
+                print(f"[DEBUG] Job {job_id} status: {status}")
+            self.stop_client()
+
+        self.peer.register_message_handler("MSG_STATE_INFO", _handle_query_response)
+
+        
+        # Process the message as needed
+        # For example, update job status in internal records
+        def on_entered():
+            print(f"Connected to hub {hub_host}:{hub_port}")
+
+            # Find Gateway RA
+            hub_ras = self.peer.find_peers({"peer_type": "RA", "ra_id": gw_RA_id})
+            if not hub_ras:
+                print("Gateway RA {}", {gw_RA_id}, "} not found!")
+                return
+ 
+            hub_ra_id = hub_ras[0]
+            print(f"Connected to hub: {hub_ra_id}")
+
+            # Create job status query message
+            query_message = {
+                "job_id": job_id,
+                "client_id": self.client_id,
+                "timestamp": time.time(),
+                "action": "query_job_status_all"
+            }
+ 
+            print("Sending job status query all to the selected RA...")
+            self.peer.send(hub_ra_id, "MSG_JOB_STATUS_QUERY_ALL", query_message)
+            print("Job status query all submitted.")
+ 
+        try:
+            self.peer.enter(hub_host, hub_port).addCallback(lambda _: on_entered())
+            self.peer.start()
+ 
+        except Exception as e:
+            self.logger.error(f"Failed to connect: {e}")
+            return False
+    
 
     def get_job_status(self, job_id, hub_host="", hub_port=5000, gw_RA_id=""):
         """Query job status from RA network via hub"""
