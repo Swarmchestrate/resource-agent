@@ -1,4 +1,4 @@
-request_type: ""   # submit | delete | query
+request_type: ""   # submit | delete | query | delete_all | query_all
 job_id: ""         # required for delete or query
 tosca_path: ""   # path of the application's tosca required only for submit request
 hub_host: "" # ip of the main ra
