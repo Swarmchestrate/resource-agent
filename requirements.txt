@@ -15,7 +15,7 @@ pydantic-settings==2.10.1
 PyYAML==6.0.2
 
 # P2P Communication Library 
-swchp2pcom==0.4.1
+swchp2pcom==0.4.2
 # Async support
 asyncio-mqtt==0.16.1
 # cluster-builder Library
@@ -40,7 +40,7 @@ httpx==0.27.0
 #msgpack==1.0.7
 
 # Tosca library
-Sardou>=0.12.3
+Sardou==0.12.4
 #Sardou==0.4.2
 
 # cap_lib
