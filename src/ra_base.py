@@ -285,8 +285,10 @@ class ResourceAgent:
             del self.lead_resource[job_id]
 
         if job_id in self.job_capreg_allocated:
+            # Ze-TODO: when there are multiple jobs, the first job's offer does not delete, so check offers_all first, but this is not sure.
             offers_all = self.capreg.resource_offer_query_all(job_id)
-            self.capreg.resources_and_offers_destroy_all(job_id)
+            if offers_all:
+                self.capreg.resources_and_offers_destroy_all(job_id)
             self.capreg.dump_capacity_registry_info()
             del self.job_capreg_allocated[job_id]
 
@@ -321,6 +323,7 @@ class ResourceAgent:
                 "state": "no_jobs",
                 "resources_available": True,
                 "queue_length": 0,
+                "last_job": True,
             }
             self.peer.send(peer_id, "MSG_STATE_INFO", response)
             self.logger.info(f"No jobs found. Sent empty status response to {peer_id}")

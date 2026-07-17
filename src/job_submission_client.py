@@ -119,7 +119,7 @@ class SwarmchestrateClient:
             enable_rejoin=False,
             metadata={"peer_type": "JOB_CLIENT", "client_id": self.client_id}
         )
-
+        # Ze-done: client should stop, this is not happening yet, in the no jobs case
         def _handle_query_response(peer_id: str, message: dict[str, Any]):
             """Handle job status query responses from RA"""
             print(f"Received job status response from {peer_id}")
@@ -316,7 +316,7 @@ class SwarmchestrateClient:
             enable_rejoin=False,
             metadata={"peer_type": "JOB_CLIENT", "client_id": self.client_id}
         )
-
+        # Ze-TODO: client should stop, this is not happening yet
         def _handle_delete_all_response(peer_id: str, message: dict[str, Any]):
             """Handle responses from RA"""
             print("[DEBUG] MSG_DELETE_ALL_RESPONSE received")
