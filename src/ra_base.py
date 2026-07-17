@@ -359,7 +359,7 @@ class ResourceAgent:
                 f"Sent job status for {job_id} to {peer_id} "
                 f"(last_job={response['last_job']})"
             )
-            
+
         self.logger.info(f"Sent status for {len(job_ids)} jobs to {peer_id}")
         
 
@@ -588,7 +588,7 @@ class ResourceAgent:
                         "result": "failure",
                         "message": "Failed to delete job, job not found",
                     }
-                    self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)
+                    self.peer.send(client_id, "MSG_DELETE_ALL_RESPONSE", delete_response_message)
 
                 continue
 
@@ -640,7 +640,7 @@ class ResourceAgent:
                     "result": "success",
                     "message": "Job deletion request broadcast successfully",
                 }
-                self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)
+                self.peer.send(client_id, "MSG_DELETE_ALL_RESPONSE", delete_response_message)
 
         self.logger.info("All job deletion requests have been processed")
 
