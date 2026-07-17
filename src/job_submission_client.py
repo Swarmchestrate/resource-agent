@@ -123,13 +123,18 @@ class SwarmchestrateClient:
         def _handle_query_response(peer_id: str, message: dict[str, Any]):
             """Handle job status query responses from RA"""
             print(f"Received job status response from {peer_id}")
-            job_id = message.get('job_id')
-            status = message.get('state')
+
+            job_id = message.get("job_id")
+            status = message.get("state")
+            last_job = message.get("last_job", False)
+
             if status == "unknown":
                 print(f"[DEBUG] Job {job_id} not found")
             else:
                 print(f"[DEBUG] Job {job_id} status: {status}")
-            self.stop_client()
+
+            if last_job:
+                self.stop_client()
 
         self.peer.register_message_handler("MSG_STATE_INFO", _handle_query_response)
 

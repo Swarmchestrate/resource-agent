@@ -326,8 +326,23 @@ class ResourceAgent:
             self.logger.info(f"No jobs found. Sent empty status response to {peer_id}")
             return
 
+        # # 2) Send status of each job back
+        # for job_id in job_ids:
+        #     job_state = self.job_states.get(job_id, {})
+
+        #     response = {
+        #         "job_id": job_id,
+        #         "ra_id": self.ra_id,
+        #         "state": job_state.get("state", "unknown"),
+        #         "resources_available": True,
+        #         "queue_length": 0,
+        #     }
+
+        #     self.peer.send(peer_id, "MSG_STATE_INFO", response)
+        #     self.logger.info(f"Sent job status for {job_id} to {peer_id}")
+
         # 2) Send status of each job back
-        for job_id in job_ids:
+        for i, job_id in enumerate(job_ids):
             job_state = self.job_states.get(job_id, {})
 
             response = {
@@ -336,11 +351,15 @@ class ResourceAgent:
                 "state": job_state.get("state", "unknown"),
                 "resources_available": True,
                 "queue_length": 0,
+                "last_job": i == len(job_ids) - 1,
             }
 
             self.peer.send(peer_id, "MSG_STATE_INFO", response)
-            self.logger.info(f"Sent job status for {job_id} to {peer_id}")
-
+            self.logger.info(
+                f"Sent job status for {job_id} to {peer_id} "
+                f"(last_job={response['last_job']})"
+            )
+            
         self.logger.info(f"Sent status for {len(job_ids)} jobs to {peer_id}")
         
 
