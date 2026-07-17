@@ -150,7 +150,7 @@ class SwarmchestrateClient:
 
             # Create job status query message
             query_message = {
-                "job_id": job_id,
+                #"job_id": job_id,
                 "client_id": self.client_id,
                 "timestamp": time.time(),
                 "action": "query_job_status_all"
