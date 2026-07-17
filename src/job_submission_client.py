@@ -305,8 +305,7 @@ class SwarmchestrateClient:
             return False
             
             
-            
-    def delete_job_all(self, job_id, hub_host="", hub_port=5000, gw_RA_id=""):
+    def delete_job_all(self, hub_host="", hub_port=5000, gw_RA_id=""):
         """Delete all jobs from RA network via hub"""
         print("Swarmchestrate Job Deletion Client")
         print("=" * 60)
@@ -359,7 +358,7 @@ class SwarmchestrateClient:
 
             # Create job deletion message
             delete_message = {
-                "job_id": job_id,
+                #"job_id": job_id,
                 "client_id": self.client_id,
                 "timestamp": time.time(),
                 "action": "delete_job_all"
