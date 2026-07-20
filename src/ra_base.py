@@ -290,15 +290,25 @@ class ResourceAgent:
             del self.lead_resource[job_id]
 
         if job_id in self.job_capreg_allocated:
-            # Ze-TODO: when there are multiple jobs, the first job's offer does not delete, so check offers_all first, but this is not sure.
-            offers_all = self.capreg.resource_offer_query_all(job_id)
-            if offers_all:
-                print(f"[DEBUG] Found offers for job {job_id}, proceeding to destroy them.")
-                self.capreg.resources_and_offers_destroy_all(job_id)
-            else:
-                print(f"[DEBUG] No offers found for job {job_id}, skipping destroy.")
-            self.capreg.dump_capacity_registry_info()
+            print(
+                f"[DEBUG] Releasing capacity-registry resources "
+                f"and offers for job {job_id}"
+            )
+
+            self.capreg.resources_and_offers_destroy_all(job_id)
+
             del self.job_capreg_allocated[job_id]
+
+        # if job_id in self.job_capreg_allocated:
+        #     # Ze-TODO: when there are multiple jobs, the first job's offer does not delete, so check offers_all first, but this is not sure.
+        #     offers_all = self.capreg.resource_offer_query_all(job_id)
+        #     if offers_all:
+        #         print(f"[DEBUG] Found offers for job {job_id}, proceeding to destroy them.")
+        #         self.capreg.resources_and_offers_destroy_all(job_id)
+        #     else:
+        #         print(f"[DEBUG] No offers found for job {job_id}, skipping destroy.")
+        #     self.capreg.dump_capacity_registry_info()
+        #     del self.job_capreg_allocated[job_id]
         print(f"[DEBUG] Job {job_id} deleted successfully, updated capacity registry:")
         self.capreg.dump_capacity_registry_info()
 
