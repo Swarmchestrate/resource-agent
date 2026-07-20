@@ -69,7 +69,7 @@ class ResourceAgent:
         self.config = self._load_config(config_file)
         self.dry_run = self.config.get('dry_run', False)
         print(f"[DEBUG] Dry run mode is {'enabled' if self.dry_run else 'disabled'} for RA {self.config.get('RA_id')}")
-        
+
         self.job_tosca = {} # store the tosca of each job [job_id]
         self.job_states = {} # store the state of each job [job_id]{state: xxx}
         self.job_responses = {} # store the resource responses from RAs for each job [job_id][ra_id]
@@ -266,7 +266,10 @@ class ResourceAgent:
             self.logger.info(f"As the lead resource, proceeding to delete the cluster for job {job_id}")
             CLUSTER_NAME = job_id
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-            swarmchestrate.destroy(CLUSTER_NAME, dryrun=self.dry_run)
+            if self.dry_run:
+                self.logger.info(f"Dry run enabled. Would destroy cluster {CLUSTER_NAME} for job {job_id}.")
+            else:
+                swarmchestrate.destroy(CLUSTER_NAME, dryrun=self.dry_run)
         
         if job_id in self.job_states:
             del self.job_states[job_id]
@@ -1467,8 +1470,17 @@ class ResourceAgent:
             master_node = json.loads(master_node)
 
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-            outputs = swarmchestrate.add_node(master_node, dryrun=self.dry_run)
+            if self.dry_run:
+                self.logger.info(f"Dry run enabled. Would create lead resource with the following configuration: {json.dumps(master_node, indent=2)}")
+                k3s_token = "dry-run-token"
+                cluster_name = job_id
+                master_ip = "dry-run-ip"
+            else:
+                outputs = swarmchestrate.add_node(master_node, dryrun=self.dry_run)
 
+                k3s_token = outputs.get("k3s_token")
+                cluster_name = outputs.get("cluster_name")
+                master_ip = outputs.get("master_ip")
             # Add logic to update resource status in the registry based on the result of node creation
             # cap-lib-DONE: assigned -> allocated
             
@@ -1481,9 +1493,7 @@ class ResourceAgent:
                         self.capreg.resource_set_deployed(job_id, msid, res_set["restype"], res_set["resid"], res_set["count"])
             self.capreg.dump_capacity_registry_info()
 
-            k3s_token = outputs.get("k3s_token")
-            cluster_name = outputs.get("cluster_name")
-            master_ip = outputs.get("master_ip")
+
 
 
             
@@ -1605,13 +1615,16 @@ class ResourceAgent:
             manifest_folder = Path(cfg["manifest_folder"])
             manifest_folder.exists() or exit(f"❌ Manifest folder does not exist: {manifest_folder}")
             # Run cluster-builder copy-manifest
-            Swarmchestrate(template_dir="templates", output_dir="output").deploy_manifests(
-            manifest_folder=str(manifest_folder),
-            master_ip=cfg["master_ip"],
-            ssh_key_path=cfg["ssh_key_path"],
-            ssh_port=cfg["ssh_port"],
-            ssh_user=cfg["ssh_user"]
-            )
+            if self.dry_run:
+                print(f"[DEBUG] Dry run enabled. Skipping manifest deployment for job {job_id}.")
+            else:
+                Swarmchestrate(template_dir="templates", output_dir="output").deploy_manifests(
+                manifest_folder=str(manifest_folder),
+                master_ip=cfg["master_ip"],
+                ssh_key_path=cfg["ssh_key_path"],
+                ssh_port=cfg["ssh_port"],
+                ssh_user=cfg["ssh_user"]
+                )
             # Ze-DONE: master_ip will always be a public ip
             # for the edge case, if edge_device_local_ip is present, this means its public ip does not support ports
             # to form a k3s cluster, we need to use the local ip
@@ -1881,7 +1894,10 @@ class ResourceAgent:
             
             worker_node = json.loads(worker_node)
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-            swarmchestrate.add_node(worker_node, dryrun=self.dry_run)
+            if self.dry_run:
+                self.logger.info(f"Dry run enabled. Would create worker node with the following configuration: {json.dumps(worker_node, indent=2)}")
+            else:
+                swarmchestrate.add_node(worker_node, dryrun=self.dry_run)
 
             offers_all = self.capreg.resource_offer_query_all(job_id)
             for msid in offers_all.keys():
