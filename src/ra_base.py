@@ -67,6 +67,7 @@ class ResourceAgent:
         self.config_file = config_file
         self.capacity_file = capacity_file
         self.config = self._load_config(config_file)
+        self.dry_run = self.config.get('dry_run', False)
 
         self.job_tosca = {} # store the tosca of each job [job_id]
         self.job_states = {} # store the state of each job [job_id]{state: xxx}
@@ -264,7 +265,7 @@ class ResourceAgent:
             self.logger.info(f"As the lead resource, proceeding to delete the cluster for job {job_id}")
             CLUSTER_NAME = job_id
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-            swarmchestrate.destroy(CLUSTER_NAME)
+            swarmchestrate.destroy(CLUSTER_NAME, dryrun=self.dry_run)
         
         if job_id in self.job_states:
             del self.job_states[job_id]
@@ -1465,7 +1466,7 @@ class ResourceAgent:
             master_node = json.loads(master_node)
 
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-            outputs = swarmchestrate.add_node(master_node)
+            outputs = swarmchestrate.add_node(master_node, dryrun=self.dry_run)
 
             # Add logic to update resource status in the registry based on the result of node creation
             # cap-lib-DONE: assigned -> allocated
@@ -1578,10 +1579,12 @@ class ResourceAgent:
                "secret_names": ["regcred"] #optional
                #"namespace":"test" , #optional
             }
- 
-            # Run the registry secret creation
-            swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-            swarmchestrate.create_registry_secrets(registry_config)
+            if self.dry_run:
+                print(f"[DEBUG] Dry run enabled. Skipping registry secret creation for job {job_id}.")
+            else:
+                # Run the registry secret creation
+                swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
+                swarmchestrate.create_registry_secrets(registry_config)
 
             # Ze-TODO: until here were commented
             # Use absolute path to ensure OpenTofu can find it from any directory
@@ -1875,10 +1878,9 @@ class ResourceAgent:
                 }[cloud]
             print(f"ssh_user is {ssh_user}")
             
-            
             worker_node = json.loads(worker_node)
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-            swarmchestrate.add_node(worker_node)
+            swarmchestrate.add_node(worker_node, dryrun=self.dry_run)
 
             offers_all = self.capreg.resource_offer_query_all(job_id)
             for msid in offers_all.keys():
