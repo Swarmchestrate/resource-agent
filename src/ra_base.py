@@ -1288,21 +1288,31 @@ class ResourceAgent:
 #        print(f"[DEBUG]all_offers in capacity registry for job {job_id} is {all_offers}")
 
         self.capreg.dump_capacity_registry_info()
-        # for all resources
-        for ms_id in all_offers.keys():
-            # for all offers in the resource
-            for offer_id in all_offers[ms_id].keys():
-                # compare whether it should be accepted or rejected
-                for selected_ms, offers in the_selected_offer.items():
-                    if selected_ms != ms_id:
-                        continue
-                    for selected_offer_id, data in offers.items():
-                        offer = all_offers[ms_id][offer_id]
-                        if selected_offer_id == offer_id:
-                            self.capreg.resource_offer_accept(offer_id, offer)
-                        else:
-                            self.capreg.resource_offer_reject(offer_id, offer)
+        # Ze-TODO: this may be wrong
+        # # for all resources
+        # for ms_id in all_offers.keys():
+        #     # for all offers in the resource
+        #     for offer_id in all_offers[ms_id].keys():
+        #         # compare whether it should be accepted or rejected
+        #         for selected_ms, offers in the_selected_offer.items():
+        #             if selected_ms != ms_id:
+        #                 continue
+        #             for selected_offer_id, data in offers.items():
+        #                 offer = all_offers[ms_id][offer_id]
+        #                 if selected_offer_id == offer_id:
+        #                     self.capreg.resource_offer_accept(offer_id, offer)
+        #                 else:
+        #                     self.capreg.resource_offer_reject(offer_id, offer)
 
+        for ms_id, offers in all_offers.items():
+            selected_ids = set(the_selected_offer.get(ms_id, {}).keys())
+
+            for offer_id, offer in offers.items():
+                if offer_id in selected_ids:
+                    self.capreg.resource_offer_accept(offer_id, offer)
+                else:
+                    self.capreg.resource_offer_reject(offer_id, offer)
+                    
 
         self.capreg.dump_capacity_registry_info()
 
