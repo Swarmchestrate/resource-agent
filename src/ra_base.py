@@ -296,7 +296,8 @@ class ResourceAgent:
                 self.capreg.resources_and_offers_destroy_all(job_id)
             self.capreg.dump_capacity_registry_info()
             del self.job_capreg_allocated[job_id]
-
+        print(f"[DEBUG] Job {job_id} deleted successfully, updated capacity registry:")
+        self.capreg.dump_capacity_registry_info()
 
     def _handle_job_status_query(self, peer_id: str, message: Dict[str, Any]):
         """Handle job status query requests"""
