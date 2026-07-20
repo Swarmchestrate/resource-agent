@@ -68,7 +68,8 @@ class ResourceAgent:
         self.capacity_file = capacity_file
         self.config = self._load_config(config_file)
         self.dry_run = self.config.get('dry_run', False)
-
+        print(f"[DEBUG] Dry run mode is {'enabled' if self.dry_run else 'disabled'} for RA {self.config.get('RA_id')}")
+        
         self.job_tosca = {} # store the tosca of each job [job_id]
         self.job_states = {} # store the state of each job [job_id]{state: xxx}
         self.job_responses = {} # store the resource responses from RAs for each job [job_id][ra_id]
