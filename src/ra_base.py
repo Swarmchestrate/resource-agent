@@ -597,7 +597,7 @@ class ResourceAgent:
         # Include this RA itself and avoid duplicates
         all_ras = list(set(all_ras + [self.ra_id]))
 
-        for job_id in job_ids:
+        for i, job_id in enumerate(job_ids):
             client_id = self.job_clients.get(job_id)
 
             if job_id not in self.job_offers:
