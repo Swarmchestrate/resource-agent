@@ -609,9 +609,9 @@ class ResourceAgent:
                         "ra_id": self.ra_id,
                         "result": "failure",
                         "message": "Failed to delete job, job not found",
+                        "last_job": True,
                     }
                     self.peer.send(client_id, "MSG_DELETE_ALL_RESPONSE", delete_response_message)
-
                 continue
 
             selected_ms = self.lead_resource.get(job_id)
@@ -661,6 +661,8 @@ class ResourceAgent:
                     "ra_id": self.ra_id,
                     "result": "success",
                     "message": "Job deletion request broadcast successfully",
+                    "last_job": i == len(job_ids) - 1,
+                                        
                 }
                 self.peer.send(client_id, "MSG_DELETE_ALL_RESPONSE", delete_response_message)
 

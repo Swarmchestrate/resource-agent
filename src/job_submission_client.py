@@ -327,6 +327,7 @@ class SwarmchestrateClient:
 
             job_id = message.get("job_id")
             result = message.get("result")
+            last_job = message.get("last_job", False)
 
             # Ze-TODO: should return the exact job id if exists
             if result == "failure":
@@ -339,8 +340,8 @@ class SwarmchestrateClient:
 
             print(f"[DEBUG] Jobs are all deleted")
             self.logger.info(f"Job deletion all succeeded")
-
-            self.stop_client()
+            if last_job:
+                self.stop_client()
 
         self.peer.register_message_handler("MSG_DELETE_ALL_RESPONSE", _handle_delete_all_response)
 
