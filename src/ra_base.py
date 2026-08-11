@@ -47,6 +47,8 @@ from utility import generate_tosca_configmap as write_tosca_configmap
 from utility import generate_swarm_configmap as write_swarm_configmap
 #from utility import get_resource_capacity as get_resource_capacity
 
+from trust_store import TrustStore
+
 # KB
 from kb_client import KBClient
 
@@ -90,7 +92,7 @@ class ResourceAgent:
         self.bootstrap_peers = self.config.get('bootstrap_peers', [])
         self.credentials = self.config.get('credentials', {})
         self.hub_ra_ip = self.config.get('hub_ra_ip', '')
-
+        self.trust_store = TrustStore()
 
         # Setup logging
         self._setup_logging()
@@ -112,6 +114,12 @@ class ResourceAgent:
         #print(f"[DEBUG] Capacity registry info for RA {self.config.get('RA_id')}:")
         #for key, value in self.capreg.get_capacity_info().items():
         #    print(f"[DEBUG]   {key}: {value}")
+
+    ########
+    # Trust score
+    ########
+        # Retrieve trust score from KB for this RA
+
 
     ########
     # CDT
@@ -949,7 +957,9 @@ class ResourceAgent:
     
     # cap-lib-DONE: this function should be modified to create all combination
     def _compile_and_display_results(self, job_id):
-        """Compile and display resource allocation results"""
+        """
+        Collect all resource responses, compile and display all combinations
+        """
         print("\nCompiling resource offers...")
         print("=" * 60)
 
@@ -1024,6 +1034,8 @@ class ResourceAgent:
 
         # print(f"[DEBUG] Testing valid combinations loaded from file: {filename}")
         
+        # Trust Score Ze: now we have all valid combinations, we need to retrieve the trust scores of each RA / or shall we update CDT with trust score so that they are embedded in the resource offer? For now, we will retrieve the trust score from CDT for each RA in the valid combinations
+
         if valid_combinations:
             print(f"Found {len(valid_combinations)} valid combination(s):")
             print("-" * 60)
@@ -1199,13 +1211,27 @@ class ResourceAgent:
         energy_list = []
         bandwidth_list = []
         price_list = []
+
+        # Ze-TODO: we need trust score for each RA stores as a dict
+        # We get the list of RAs from the valid_combinations
+        ra_ids = set()
+        for combination_data in valid_combinations.values():
+            for ms_id, offers in combination_data.items():
+                for offer_id, resource_data in offers.items():
+                    ra_id = resource_data.get('ids', {}).get('ra_id')
+                    if ra_id:
+                        ra_ids.add(ra_id)
+        
+        # We get the list of trust scores from OptimusDB
+        trust_scores = {ra_id: self.trust_store.get_trust_score(ra_id, default=1.0) for ra_id in ra_ids}
         
         # Ze: for each combination we calculate its qos
         for combination_data in valid_combinations.values():
             total_energy = 0
             total_bandwidth = 0
             total_price = 0
-            
+            total_reliability = 0
+
             # Ze: we sum the total qos consumption of each combination
             for ms_id, offers in combination_data.items():
                 for offer_id, resource_data in offers.items():
@@ -1214,12 +1240,21 @@ class ResourceAgent:
                     total_energy += chars.get('energy.consumption', 0)
                     total_bandwidth += int(chars.get('host.bandwidth', 0))
                     total_price += chars.get('pricing.cost', 0)
-            
+                    # Ze-TODO:
+                    ra_id = resource_data.get('ids', {}).get('ra_id')
+                    if ra_id:
+                        trust_score = trust_scores.get(ra_id, 1.0)  # Default to 1.0 if not found
+                    else:
+                        trust_score = 1.0
+                    total_reliability += trust_score
+
+                    # ra_id = resource_data.get('ids', {}).get('ra_id')
+                    # total reliability += trust_scores.get(ra_id, 1) # Default to 1 if not found
             energy_list.append(total_energy)
             bandwidth_list.append(total_bandwidth)
             price_list.append(total_price)
             # Ze-TODO: here we assume reliability and latency are not present in RA's CDT
-            reliability_list.append(1)
+            reliability_list.append(total_reliability)
             latency_list.append(1)
 
 
