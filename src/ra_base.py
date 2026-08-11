@@ -1270,9 +1270,9 @@ class ResourceAgent:
                     # total reliability += trust_scores.get(ra_id, 1) # Default to 1 if not found
             # Ze-TODO: seems a problem with ranking, we want low energy, high bandwidth, low price, high reliability, low latency. 
             # So we need to negate the values for energy and price to make them maximization problems.
-            energy_list.append(-total_energy)
+            energy_list.append(total_energy)
             bandwidth_list.append(total_bandwidth)
-            price_list.append(-total_price)
+            price_list.append(total_price)
             # Ze-TODO: here we assume reliability and latency are not present in RA's CDT
             reliability_list.append(total_reliability)
             print(f"[DEBUG] total_reliability for combination is {total_reliability}")
@@ -1294,7 +1294,8 @@ class ResourceAgent:
 
         # Ze: AI ranking algorithm takes qos_priority and qos values of each offer combination as input.
         evaluator = OfferEvaluator(offer_data)
-        optimal_index = evaluator.rank_offers_without_reliability()
+        #optimal_index = evaluator.rank_offers_without_reliability()
+        optimal_index = evaluator.rank_offers_with_reliability_addition()
         # Return first item if optimal_index is not empty
         return optimal_index[0]
 
