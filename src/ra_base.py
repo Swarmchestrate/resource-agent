@@ -1221,10 +1221,10 @@ class ResourceAgent:
                     ra_id = resource_data.get('ids', {}).get('ra_id')
                     if ra_id:
                         ra_ids.add(ra_id)
-        
+        print(f"[DEBUG] RA IDs extracted from valid combinations: {ra_ids}")
         # We get the list of trust scores from OptimusDB
         trust_scores = {ra_id: self.trust_store.get_trust_score(ra_id, default=1.0) for ra_id in ra_ids}
-        
+        print(f"[DEBUG] Trust scores retrieved from OptimusDB: {trust_scores}")
         # Ze: for each combination we calculate its qos
         for combination_data in valid_combinations.values():
             total_energy = 0
@@ -1255,6 +1255,7 @@ class ResourceAgent:
             price_list.append(total_price)
             # Ze-TODO: here we assume reliability and latency are not present in RA's CDT
             reliability_list.append(total_reliability)
+            print(f"[DEBUG] total_reliability for combination is {total_reliability}")
             latency_list.append(1)
 
 
