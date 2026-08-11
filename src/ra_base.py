@@ -1036,6 +1036,22 @@ class ResourceAgent:
         
         # Trust Score Ze: now we have all valid combinations, we need to retrieve the trust scores of each RA / or shall we update CDT with trust score so that they are embedded in the resource offer? For now, we will retrieve the trust score from CDT for each RA in the valid combinations
 
+
+        ra_ids = set()
+        for combination_data in valid_combinations.values():
+            for ms_id, offers in combination_data.items():
+                for offer_id, resource_data in offers.items():
+                    ra_id = resource_data.get('ids', {}).get('ra_id')
+                    if ra_id:
+                        ra_ids.add(ra_id)
+        print(f"[DEBUG] RA IDs extracted from valid combinations: {ra_ids}")
+        # We get the list of trust scores from OptimusDB
+        trust_scores = {ra_id: self.trust_store.get_trust_score(ra_id, default=1.0) for ra_id in ra_ids}
+        print(f"[DEBUG] Trust scores retrieved from OptimusDB: {trust_scores}")
+
+
+
+
         if valid_combinations:
             print(f"Found {len(valid_combinations)} valid combination(s):")
             print("-" * 60)
@@ -1047,7 +1063,7 @@ class ResourceAgent:
                 energy_consumption = 0
                 total_bandwidth = 0
                 total_price = 0
-
+                total_reliability = 0
                 # combination.keys() are now "details_v1", "ratings_v1", etc.
                 for ms_id in sorted(combination.keys()):
                     # This is the inner dict (e.g., the "ra-fuelics..." key)
@@ -1060,7 +1076,8 @@ class ResourceAgent:
                         # Update totals using the 'characteristics' keys from your JSON
                         energy_consumption += chars.get('energy.consumption', 0)
                         total_price += chars.get('pricing.cost', 0)
-                        
+                        total_reliability += trust_scores.get(ids.get('ra_id', ''), 1.0)  # Default to 1.0 if not found
+
                         # Bandwidth is a string in some JSONs, ensure it's an int
                         total_bandwidth += int(chars.get('host.bandwidth', 0))
                         
@@ -1069,7 +1086,7 @@ class ResourceAgent:
 
                 combo_str = f"{i}. " + ", ".join(resource_items)
                 print(combo_str)
-                print(f"   >> Total energy: {energy_consumption:.2f} | Bandwidth: {total_bandwidth} | Price: {total_price:.2f}")
+                print(f"   >> Total energy: {energy_consumption:.2f} | Bandwidth: {total_bandwidth} | Price: {total_price:.2f} | Reliability: {total_reliability:.2f}")
             print("-" * 60)
             
             # Randomly select one combination
@@ -1093,6 +1110,7 @@ class ResourceAgent:
             energy_consumption = 0
             total_bandwidth = 0
             total_price = 0
+            total_reliability = 0
             for ms_id in sorted(selected_combination.keys()):
                 offers = selected_combination[ms_id]
             
@@ -1110,12 +1128,12 @@ class ResourceAgent:
                     energy_consumption += chars.get('energy.consumption', 0)
                     total_price += chars.get('pricing.cost', 0)
                     total_bandwidth += int(chars.get('host.bandwidth', 0))
-                    
+                    total_reliability += trust_scores.get(ids.get('ra_id', ''), 1.0)
                     resource_items.append(f"{ms_id}: {ra_id}")
 
             
             print(", ".join(resource_items))
-            print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}, total price is: {total_price}")
+            print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}, total price is: {total_price}, total reliability is: {total_reliability:.2f}")
             print("=" * 60)
         else:
             print(f"No valid resource combinations found for job {job_id}!")
