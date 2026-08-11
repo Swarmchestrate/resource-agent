@@ -1268,9 +1268,11 @@ class ResourceAgent:
 
                     # ra_id = resource_data.get('ids', {}).get('ra_id')
                     # total reliability += trust_scores.get(ra_id, 1) # Default to 1 if not found
-            energy_list.append(total_energy)
+            # Ze-TODO: seems a problem with ranking, we want low energy, high bandwidth, low price, high reliability, low latency. 
+            # So we need to negate the values for energy and price to make them maximization problems.
+            energy_list.append(-total_energy)
             bandwidth_list.append(total_bandwidth)
-            price_list.append(total_price)
+            price_list.append(-total_price)
             # Ze-TODO: here we assume reliability and latency are not present in RA's CDT
             reliability_list.append(total_reliability)
             print(f"[DEBUG] total_reliability for combination is {total_reliability}")
