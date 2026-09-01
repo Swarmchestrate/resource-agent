@@ -168,6 +168,7 @@ class ResourceAgent:
                         capacity_content = stream.read()
                     except yaml.YAMLError as exc:
                         print(exc)
+                # Ze-TODO: but at here we are not using DID
                 parsed_capacity = yaml.safe_load(capacity_content)
                 upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
                 if upload["success"]:
@@ -1300,7 +1301,15 @@ class ResourceAgent:
         print(f"[DEBUG] qos_data extracted from raw TOSCA is {qos_data}")
         qos_priority = get_qos_priorities(qos_data)
         print(f"[DEBUG] qos_priority extracted from TOSCA is {qos_priority}")
-        
+        if not qos_priority:
+            print("[WARN] No QoS priorities found in TOSCA, using default priorities")
+            qos_priority = {
+                "reliability": 1,
+                "latency": 1,
+                "energy": 1,
+                "bandwidth": 1,
+                "price": 1
+            }
         reliability_list = []
         latency_list = []
         energy_list = []
