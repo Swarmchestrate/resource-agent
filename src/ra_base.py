@@ -86,7 +86,7 @@ class ResourceAgent:
         # Extract configuration values
         self.ra_id = self.config.get('RA_id')
         # Ze: add DID, this is the digital ID for the CDT
-        self.ra_did = self.config.get('RA_did')
+        self.ra_cap_id = self.config.get('cap_id')
         self.universe_id = self.config.get('universe_id')
         self.api_port = self.config.get('api_port')
         self.p2p_port = self.config.get('p2p_port')
@@ -126,23 +126,29 @@ class ResourceAgent:
     ########
 
 
-        if self.ra_did:
-            self.logger.info(f"RA{self.ra_id}: RA DID is {self.ra_did}")
-            download = KBClient.download_CDT_from_KB(self.ra_did)
+        if self.ra_cap_id:
+            self.logger.info(f"RA{self.ra_id}: RA CAP ID is {self.ra_cap_id}")
+            download = KBClient.download_CDT_from_KB(self.ra_cap_id)
             if download["success"]:
-                self.logger.info(f"RA{self.ra_id}: CDT {self.ra_did} {download['filename']} downloaded successfuly from KB")
+                self.logger.info(f"RA{self.ra_id}: CDT {self.ra_cap_id} {download['filename']} downloaded successfuly from KB")
                 self.logger.info(f"RA{self.ra_id}: {download['data']}")
-                # Ze-TODO: CDT should have a DID field, and tosca could fetch it
-                # Ze-TODO: verify the downloaded CDT's DID with the provided did
-                if True:
-                    self.logger.info(f"RA{self.ra_id}: CDT {self.ra_did} verified successfuly")
-                    parsed_capacity = yaml.safe_load(download['data'])
-                    # Ze-DONE: capacity_content
-                    capacity_content = download['data']
-                    # Ze-DONE: save the downloaded CDT to local file
-                    with open(f"cdt_{self.ra_did}.yaml", "w") as f:
-                        f.write(capacity_content)
-                    self.capacity_file = f"cdt_{self.ra_did}.yaml"
+                parsed_capacity = yaml.safe_load(download['data'])
+                # Ze-DONE: capacity_content
+                capacity_content = download['data']
+                # Ze-DONE: save the downloaded CDT to local file
+                with open(f"cdt_{self.ra_cap_id}_tmp.yaml", "w") as f:
+                    f.write(capacity_content)
+                self.capacity_file = f"cdt_{self.ra_cap_id}_tmp.yaml"
+                # Ze-DONE: CDT should have a CAP ID field, and tosca could fetch it
+                cdt = Sardou(self.capacity_file)
+                cap_id_in_cdt = cdt.get_cap_id()
+                # Ze-DONE: verify the downloaded CDT's CAP ID with the provided cap_id
+                if cap_id_in_cdt != self.ra_cap_id:
+                    self.logger.error(f"RA{self.ra_id}: CDT {self.ra_cap_id} CAP ID mismatch: {cap_id_in_cdt}")
+                    raise Exception(f"RA{self.ra_id}: CDT {self.ra_cap_id} CAP ID mismatch: {cap_id_in_cdt}")
+                else:
+                    self.logger.info(f"RA{self.ra_id}: CDT {self.ra_cap_id} CAP ID verified successfully")
+            # Ze-DONE: no online resource then we go for offline submitted by the user
             else:
                 self.logger.error(f"RA{self.ra_id}: Download from KB failed: {download['error']}, the CDT file may not exist in KB, try finding from local input and uploading it to KB")
                 if self.capacity_file:
@@ -152,7 +158,7 @@ class ResourceAgent:
                         except yaml.YAMLError as exc:
                             print(exc)
                     parsed_capacity = yaml.safe_load(capacity_content)
-                    upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
+                    upload = KBClient.upload_CDT_to_KB(self.ra_cap_id, parsed_capacity)
                     if upload["success"]:
                         self.logger.info(f"RA{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
                     else:
@@ -161,16 +167,15 @@ class ResourceAgent:
                     self.logger.error(f"RA{self.ra_id}: No capacity_file specified, cannot load CDT")
                     raise Exception("No capacity_file specified, cannot load CDT")
         else:
-            self.logger.warning(f"RA{self.ra_id}: No RA DID specified, trying to load from local capacity_file")
+            self.logger.warning(f"RA{self.ra_id}: No RA CAP ID specified, trying to load from local capacity_file")
             if self.capacity_file:
                 with open(self.capacity_file) as stream:
                     try:
                         capacity_content = stream.read()
                     except yaml.YAMLError as exc:
                         print(exc)
-                # Ze-TODO: but at here we are not using DID
                 parsed_capacity = yaml.safe_load(capacity_content)
-                upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
+                upload = KBClient.upload_CDT_to_KB(self.ra_cap_id, parsed_capacity)
                 if upload["success"]:
                     self.logger.info(f"RA{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
                 else:
