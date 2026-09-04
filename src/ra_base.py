@@ -185,19 +185,6 @@ class ResourceAgent:
                 raise Exception("No capacity_file specified, cannot load CDT")
 
     
-        # download = KBClient.download_CDT_from_KB(self.ra_id)
-        # if download["success"]:
-        #     self.logger.info(f"RA{self.ra_id}: {download['filename']} downloaded successfuly from KB")
-        #     self.logger.info(f"RA{self.ra_id}: {download['data']}")
-        # else:
-        #     self.logger.error(f"RA{self.ra_id}: Download from KB failed: {download['error']}, the CDT file may not exist in KB, try uploading it first")
-        #     parsed_capacity = yaml.safe_load(capacity_content)
-        #     upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
-        #     if upload["success"]:
-        #         self.logger.info(f"RA{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
-        #     else:
-        #         self.logger.error(f"RA{self.ra_id}: Upload to KB failed: {upload['error']}")
-
         ######
         # CAP-LIB
         ######
