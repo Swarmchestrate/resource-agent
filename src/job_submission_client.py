@@ -409,11 +409,13 @@ class SwarmchestrateClient:
             result = message.get("result")
 
             if result == "failure":
-                print(f"[ERROR] Job {job_id} submission failed")
-                self.logger.error(f"Job {job_id} submission failed")
+                reason = message.get("message", "Unknown submission error")
+                print(f"[ERROR] Job submission failed: {reason}")
+                self.logger.error(f"Job submission failed: {reason}")
                 self.stop_client()
                 return
 
+            self.swarm_id = message.get("swarm_id") or job_id
             print(f"[DEBUG] Job {job_id} submission succeeded")
             self.logger.info(f"Job {job_id} submission succeeded")
             self.stop_client()

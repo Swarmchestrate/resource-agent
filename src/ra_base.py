@@ -507,23 +507,14 @@ class ResourceAgent:
         self.job_clients[job_id] = message.get('client_id')
 
 
-        # TODO: the client does not receive ID
-        if client_id:
-            print("Sending SWARM ID response to client:", self.job_clients[job_id])
-            submit_response_message = {
-                    "swarm_id": job_id,
-                    "ra_id": self.ra_id,
-                    "result": "SWARM_ID_ASSIGNED",
-                    "message": "SWARM ID assigned successfully, now processing the application submission"
-                    }
-            self.peer.send(peer_id, "MSG_SWARM_ID_RESPONSE", submit_response_message)
-        
         ask_yaml = message.get('tosca')
         # initialise application tosca
         self.job_tosca[job_id] = ask_yaml
 
         # Ze-done: Using TOSCA library to validate and parse the tosca then extract resource requirements
         try:
+            if self.bootstrap_peers:
+                raise ValueError("Job submissions must be sent to a hub RA")
             validate_microservice_names(ask_yaml)
             write_yaml(ask_yaml, 'tosca.yaml')
             # 1) (done) validate and parse
@@ -543,7 +534,7 @@ class ResourceAgent:
                 print(f"{upload['filename']} uploaded successfuly to KB")
             else:
                 # Should be an error log
-                print(f"Upload to KB failed: {upload['error']}")
+                raise RuntimeError(f"Upload to KB failed: {upload['error']}")
 
             download = KBClient.download_SAT_from_KB(job_id)
             if download["success"]:
@@ -552,7 +543,7 @@ class ResourceAgent:
                 print(download["data"])
             else:
                 # Should be an error log
-                print(f"Download from KB failed: {download['error']}")
+                raise RuntimeError(f"Download from KB failed: {download['error']}")
 
 
             ask_yaml = self.tosca[job_id].get_requirements()
@@ -560,8 +551,7 @@ class ResourceAgent:
             client_id = message.get('client_id')
             all_ras = self.peer.find_peers({"peer_type": "RA"})
             if not ask_yaml:
-                self.logger.error("No ask_yaml data in application submission")
-                return
+                raise ValueError("No resource requirements in application submission")
 
             # Hub RA processes resource requirements and broadcasts to other RAs
             if not self.bootstrap_peers:
@@ -596,7 +586,6 @@ class ResourceAgent:
             print(f"❌ Failed to process tosca.yaml: {e}")
             self._update_job_state(job_id, new_state="Invalid")
             self.peer.send(peer_id, "MSG_SUBMIT_RESPONSE", {
-                "job_id": job_id,
                 "ra_id": self.ra_id,
                 "result": "failure",
                 "message": str(e),
@@ -852,7 +841,7 @@ class ResourceAgent:
         # Amjad: appeared also if there are offers. temporary commenting
         #test
         # ADDED: Check if job_offers[job_id] is None (no valid combinations)
-        if job_id not in self.job_offers:
+        if not self.job_offers.get(job_id):
             self.logger.exception(
                     "No valid resource combinations for application %s",
                     job_id,
@@ -861,13 +850,13 @@ class ResourceAgent:
             if client_id:
                 print("Sending submit response failure message to client:", client_id)
                 submit_response_message = {
-                        "job_id": job_id,
                         "ra_id": self.ra_id,
                         "result": "failure",
                         "message": "Failed to compile resource offers"
                         }
                 self.peer.send(client_id, "MSG_SUBMIT_RESPONSE", submit_response_message)
-                return None
+            self._update_job_state(job_id, "Failed")
+            return None
         else:
             client_id = self.job_clients.get(job_id)
             print(f"[DEBUG] send submission success msg to client: {client_id}")
@@ -875,6 +864,7 @@ class ResourceAgent:
                 print("Sending submit response success message to client:", client_id)
                 submit_response_message = {
                         "job_id": job_id,
+                        "swarm_id": job_id,
                         "ra_id": self.ra_id,
                         "result": "success",
                         "message": "Resource offers compiled successfully"
