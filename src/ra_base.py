@@ -73,6 +73,9 @@ class ResourceAgent:
         self.dry_run = self.config.get('dry_run', False)
         print(f"[DEBUG] Dry run mode is {'enabled' if self.dry_run else 'disabled'} for RA {self.config.get('RA_id')}")
 
+        self.deletion_lock = threading.RLock()
+        self.pending_deletions = {}
+        self.deleted_jobs = set()
         self.job_tosca = {} # store the tosca of each job [job_id]
         self.job_states = {} # store the state of each job [job_id]{state: xxx}
         self.job_responses = {} # store the resource responses from RAs for each job [job_id][ra_id]
@@ -334,64 +337,66 @@ class ResourceAgent:
         self.peer.register_message_handler("MSG_CREATE_RESOURCE", self._handle_create_resource)
         self.peer.register_message_handler("MSG_CREATE_LEAD_RESOURCE", self._handle_create_lead_resource)
         self.peer.register_message_handler("MSG_DELETE_JOB_BROADCAST", self._handle_delete_job_broadcast)
+        self.peer.register_message_handler("MSG_DELETE_JOB_ACK", self._handle_delete_job_ack)
         #self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info)
         self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info_cb)
 
 
+    def _clear_job_data(self, job_id):
+        for data in (self.job_states, self.job_responses, self.master_info,
+                     self.job_clients, self.job_offers, self.lead_resource,
+                     self.job_capreg_allocated, self.job_tosca, self.tosca):
+            data.pop(job_id, None)
+
     def _handle_delete_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
-        """Handle job deletion broadcast from hub RA"""
-        self.logger.info(f"Received job deletion broadcast from hub {peer_id} for job {message.get('job_id')}")
+        """Release local resources and acknowledge completion to the hub."""
         job_id = message.get('job_id')
-        LR_id = message.get('LR_id')
-        if LR_id == self.ra_id:
-            self.logger.info(f"As the lead resource, proceeding to delete the cluster for job {job_id}")
-            CLUSTER_NAME = job_id
-            swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-            if self.dry_run:
-                self.logger.info(f"Dry run enabled. Would destroy cluster {CLUSTER_NAME} for job {job_id}.")
+        response = {"job_id": job_id, "result": "success"}
+        try:
+            if not job_id:
+                raise ValueError("Missing job_id")
+            with self.resource_lock:
+                if job_id not in self.deleted_jobs:
+                    if message.get('LR_id') == self.ra_id and not self.dry_run:
+                        result = Swarmchestrate(
+                            template_dir="templates", output_dir="output"
+                        ).destroy(job_id, dryrun=self.dry_run)
+                        if result is False:
+                            raise RuntimeError("Cluster destruction failed")
+                    # Offers can exist even if this RA never allocated resources.
+                    result = self.capreg.resources_and_offers_destroy_all(job_id)
+                    if result is False:
+                        raise RuntimeError("Capacity release failed")
+                    self.deleted_jobs.add(job_id)
+                    # Keep hub routing information until every RA has replied.
+                    if job_id not in self.pending_deletions:
+                        self._clear_job_data(job_id)
+        except Exception as exc:
+            self.logger.exception("Failed to delete job %s", job_id)
+            response.update(result="failure", message=str(exc))
+        if peer_id == self.peer.peer_id:
+            self._handle_delete_job_ack(peer_id, response)
+        else:
+            self.peer.send(peer_id, "MSG_DELETE_JOB_ACK", response)
+
+    def _handle_delete_job_ack(self, peer_id: str, message: Dict[str, Any]):
+        with self.deletion_lock:
+            job_id = message.get('job_id')
+            pending = self.pending_deletions.get(job_id)
+            if not pending or peer_id not in pending['remaining']:
+                return
+            pending['remaining'].remove(peer_id)
+            if message.get('result') != 'success':
+                pending['errors'].append(f"{peer_id}: {message.get('message', 'Cleanup failed')}")
+            if pending['remaining']:
+                return
+            del self.pending_deletions[job_id]
+            pending['timer'].cancel()
+            if pending['errors']:
+                self.job_states.setdefault(job_id, {})['state'] = 'DeleteFailed'
             else:
-                swarmchestrate.destroy(CLUSTER_NAME, dryrun=self.dry_run)
-        
-        if job_id in self.job_states:
-            del self.job_states[job_id]
-
-        if job_id in self.job_responses:
-            del self.job_responses[job_id]
-
-        if job_id in self.master_info:
-            del self.master_info[job_id]
-
-        if job_id in self.job_clients:
-            del self.job_clients[job_id]
-
-        if job_id in self.job_offers:
-            del self.job_offers[job_id]
-
-        if job_id in self.lead_resource:
-            del self.lead_resource[job_id]
-
-        if job_id in self.job_capreg_allocated:
-            print(
-                f"[DEBUG] Releasing capacity-registry resources "
-                f"and offers for job {job_id}"
-            )
-
-            self.capreg.resources_and_offers_destroy_all(job_id)
-
-            del self.job_capreg_allocated[job_id]
-
-        # if job_id in self.job_capreg_allocated:
-        #     # Ze-TODO: when there are multiple jobs, the first job's offer does not delete, so check offers_all first, but this is not sure.
-        #     offers_all = self.capreg.resource_offer_query_all(job_id)
-        #     if offers_all:
-        #         print(f"[DEBUG] Found offers for job {job_id}, proceeding to destroy them.")
-        #         self.capreg.resources_and_offers_destroy_all(job_id)
-        #     else:
-        #         print(f"[DEBUG] No offers found for job {job_id}, skipping destroy.")
-        #     self.capreg.dump_capacity_registry_info()
-        #     del self.job_capreg_allocated[job_id]
-        print(f"[DEBUG] Job {job_id} deleted successfully, updated capacity registry:")
-        self.capreg.dump_capacity_registry_info()
+                self._clear_job_data(job_id)
+            pending['complete'](job_id, pending['errors'])
 
     def _handle_job_status_query(self, peer_id: str, message: Dict[str, Any]):
         """Handle job status query requests"""
@@ -593,163 +598,97 @@ class ResourceAgent:
             return None
   
 
-    def _handle_job_delete(self, peer_id: str, message: Dict[str, Any]):
-        """Handle job deletion requests"""
-        self.logger.info(f"Received submit job deletion request from {peer_id} to delete job {message.get('job_id')}")
-        job_id = message.get('job_id')
-        client_id = self.job_clients.get(job_id)
-        if job_id not in self.job_offers:
-            self.logger.exception(
-                    f"Job {job_id} not found for deletion"
-                )
-            if client_id:
-                print("Sending delete response failure message to client:", client_id)
-                delete_response_message = {
-                        "job_id": job_id,
-                        "ra_id": self.ra_id,
-                        "result": "failure",
-                        "message": "Failed to delete job, job not found"
-                        }
-                self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)
-                return None
-#        if client_id:
-#            print("Sending delete response failure message to client:", client_id)
-#            delete_response_message = {
-#                    "job_id": job_id,
-#                    "ra_id": self.ra_id,
-#                    "result": "success",
-#                    "message": "Job deleted successfully"
-#                    }
-#            self.peer.send(client_id, "MSG_DELETE_RESPONSE", delete_response_message)
-#            
-        # Ze: determine the LR_id
+    def _start_job_deletion(self, job_id, message, complete):
+        """Track acknowledgements before reporting deletion to the requester."""
+        if job_id in self.pending_deletions:
+            complete(job_id, ["Job deletion is already in progress"])
+            return
+        if not job_id or not any(job_id in data for data in (
+                self.job_states, self.job_offers, self.job_tosca,
+                self.job_capreg_allocated, self.lead_resource)):
+            complete(job_id, ["Job not found"])
+            return
         selected_ms = self.lead_resource.get(job_id)
-        # Get the keys and ensure there is at least one offer
-        offer_keys = list(self.job_offers[job_id][selected_ms].keys())
-        if not offer_keys:
-            print(f"[ERROR] Microservice {selected_ms} has no offers!")
+        offers = self.job_offers.get(job_id, {}).get(selected_ms, {})
+        lead_ra = next(iter(offers.values()), {}).get('ids', {}).get('ra_id')
+        if selected_ms is not None and not lead_ra:
+            complete(job_id, ["Cannot determine the lead RA for cluster deletion"])
             return
-            
-        offer_id = offer_keys[0]
-        offer_data = self.job_offers[job_id][selected_ms][offer_id]
-        
-        # Using .get() for production safety
-        ids = offer_data.get("ids", {})
-        LR_id = ids.get("ra_id")
-
-        # Ze: broadcast job deletion since they may allocated the resource, but only the LR needs to delete the cluster,
-        # other RAs just need to update their capacity registry if they have allocated resource for this job
-        msg_delete_job = {
-                    "job_id": job_id,
-                    "timestamp": message.get('timestamp'),
-                    "LR_id": LR_id,
-                    "hub_ra": self.peer.peer_id
+        targets = set(self.peer.find_peers({"peer_type": "RA"}))
+        targets.update(self.job_responses.get(job_id, {}))
+        for offers in self.job_offers.get(job_id, {}).values():
+            for offer in offers.values():
+                if isinstance(offer, dict):
+                    ra_id = offer.get('ids', {}).get('ra_id')
+                    if ra_id:
+                        targets.add(ra_id)
+        if lead_ra:
+            targets.add(lead_ra)
+        targets.discard(self.ra_id)
+        targets.add(self.peer.peer_id)
+        self.pending_deletions[job_id] = {
+            'remaining': set(targets), 'errors': [], 'complete': complete,
         }
-        all_ras = self.peer.find_peers({"peer_type": "RA"})
-        all_ras += [self.ra_id] # add the main RA to the list of RAs to be informed, because the main RA also needs to update its capacity status based on the job deletion
-        for ra_id in all_ras:
-            self.peer.send(ra_id, "MSG_DELETE_JOB_BROADCAST", msg_delete_job)
-            self.logger.info(f"Broadcasted job deletion request to {ra_id}")
-    
+        pending = self.pending_deletions[job_id]
+        def expire():
+            with self.deletion_lock:
+                if self.pending_deletions.get(job_id) is not pending:
+                    return
+                for target in list(pending['remaining']):
+                    self._handle_delete_job_ack(target, {
+                        'job_id': job_id, 'result': 'failure',
+                        'message': 'Timed out waiting for deletion acknowledgement',
+                    })
+        timer = threading.Timer(self.config.get('deletion_timeout_seconds', 120), expire)
+        timer.daemon = True
+        pending['timer'] = timer
+        timer.start()
+        self.job_states.setdefault(job_id, {})['state'] = 'Deleting'
+        payload = {
+            'job_id': job_id, 'LR_id': lead_ra,
+            'hub_ra': self.peer.peer_id, 'timestamp': message.get('timestamp'),
+        }
+        for target in targets - {self.peer.peer_id}:
+            try:
+                self.peer.send(target, "MSG_DELETE_JOB_BROADCAST", payload)
+            except Exception as exc:
+                self._handle_delete_job_ack(target, {
+                    'job_id': job_id, 'result': 'failure', 'message': str(exc),
+                })
+        self._handle_delete_job_broadcast(self.peer.peer_id, payload)
 
-        self.logger.info(f"Job {job_id} deleted successfully")
+    def _handle_job_delete(self, peer_id: str, message: Dict[str, Any]):
+        def complete(job_id, errors):
+            self.peer.send(peer_id, "MSG_DELETE_RESPONSE", {
+                'job_id': job_id, 'ra_id': self.ra_id,
+                'result': 'failure' if errors else 'success',
+                'message': '; '.join(errors) if errors else 'Job deleted successfully',
+            })
+        self._start_job_deletion(message.get('job_id'), message, complete)
 
-    # Ze-TODO: to check the functionality of a lead resource hosts multiple jobs
     def _handle_job_delete_all(self, peer_id: str, message: Dict[str, Any]):
-        """Handle request to delete all jobs."""
-
-        self.logger.info(
-            f"Received job deletion all request from {peer_id} to delete all jobs"
-        )
-
-        # Get all job IDs from lead_resource
-        job_ids = list(self.lead_resource.keys())
-
+        job_ids = set(self.job_states) | set(self.job_offers) | set(self.lead_resource)
+        remaining = set(job_ids)
+        def complete(job_id, errors):
+            remaining.discard(job_id)
+            self.peer.send(peer_id, "MSG_DELETE_ALL_RESPONSE", {
+                'job_id': job_id, 'ra_id': self.ra_id,
+                'result': 'failure' if errors else 'success',
+                'message': '; '.join(errors) if errors else 'Job deletion completed',
+                'last_job': not remaining,
+            })
         if not job_ids:
-            self.logger.info("No jobs found to delete")
-            return
-
-        all_ras = self.peer.find_peers({"peer_type": "RA"})
-
-        # Include this RA itself and avoid duplicates
-        all_ras = list(set(all_ras + [self.ra_id]))
-
-        for i, job_id in enumerate(job_ids):
-            client_id = self.job_clients.get(job_id)
-
-            if job_id not in self.job_offers:
-                self.logger.error(f"Job {job_id} not found in job_offers for deletion")
-
-                if client_id:
-                    delete_response_message = {
-                        "job_id": job_id,
-                        "ra_id": self.ra_id,
-                        "result": "failure",
-                        "message": "Failed to delete job, job not found",
-                        "last_job": True,
-                    }
-                    self.peer.send(client_id, "MSG_DELETE_ALL_RESPONSE", delete_response_message)
-                continue
-
-            selected_ms = self.lead_resource.get(job_id)
-
-            if selected_ms is None:
-                self.logger.error(f"No lead resource found for job {job_id}")
-                continue
-
-            offers_for_ms = self.job_offers.get(job_id, {}).get(selected_ms, {})
-
-            if not offers_for_ms:
-                self.logger.error(
-                    f"Microservice {selected_ms} has no offers for job {job_id}"
-                )
-                continue
-
-            offer_id = next(iter(offers_for_ms))
-            offer_data = offers_for_ms[offer_id]
-
-            ids = offer_data.get("ids", {})
-            LR_id = ids.get("ra_id")
-
-            if LR_id is None:
-                self.logger.error(f"No LR_id found for job {job_id}")
-                continue
-
-            msg_delete_job = {
-                "job_id": job_id,
-                "timestamp": message.get("timestamp"),
-                "LR_id": LR_id,
-                "hub_ra": self.peer.peer_id,
-            }
-
-            for ra_id in all_ras:
-                self.peer.send(ra_id, "MSG_DELETE_JOB_BROADCAST", msg_delete_job)
-                self.logger.info(
-                    f"Broadcasted deletion request for job {job_id} to RA {ra_id}"
-                )
-
-            self.logger.info(
-                f"Job {job_id} deletion broadcast completed successfully, LR_id={LR_id}"
-            )
-
-            if client_id:
-                delete_response_message = {
-                    "job_id": job_id,
-                    "ra_id": self.ra_id,
-                    "result": "success",
-                    "message": "Job deletion request broadcast successfully",
-                    "last_job": i == len(job_ids) - 1,
-                                        
-                }
-                self.peer.send(client_id, "MSG_DELETE_ALL_RESPONSE", delete_response_message)
-
-        self.logger.info("All job deletion requests have been processed")
+            complete(None, [])
+        for job_id in sorted(job_ids):
+            self._start_job_deletion(job_id, message, complete)
 
     def _handle_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Handle job broadcast from hub RA"""
         self.logger.info(f"Received application resource requirement broadcast from hub {peer_id}")
 
         job_id = message.get('job_id')
+        if job_id in self.deleted_jobs or job_id in self.pending_deletions:
+            return
         client_id = message.get('client_id')
     
         ask_yaml = KBClient.download_SAT_from_KB(job_id)
@@ -812,6 +751,8 @@ class ResourceAgent:
         """
 
         job_id = message.get('job_id')
+        if job_id in self.deleted_jobs or job_id in self.pending_deletions:
+            return
         ra_id = message.get('ra_id')
         self.logger.info(f"Received resource response for job {job_id} from RA: {ra_id}")
         provider = message.get('provider')
@@ -1427,6 +1368,8 @@ class ResourceAgent:
         """
         self.logger.info(f"RA {self.ra_id} received the selected offer, now it will update the capacity registry accordingly")
         job_id = message.get('job_id')
+        if job_id in self.deleted_jobs or job_id in self.pending_deletions:
+            return
         the_selected_offer = message.get('offer_info', {})
 #        print(f"offer_info received by LR is {the_selected_offer}")
 
@@ -1471,6 +1414,8 @@ class ResourceAgent:
         """
         self.logger.info(f"RA {self.ra_id} receives create lead resource request from {peer_id}")
         job_id = message.get('job_id')
+        if job_id in self.deleted_jobs or job_id in self.pending_deletions:
+            return
         LR = message.get('lead_resource')
         lead_resource_name = message.get('leader_resource_name')
         instance = message.get('instance', {})
@@ -1915,6 +1860,10 @@ class ResourceAgent:
         """Process create resource request from LRA"""
         self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
         job_id = message.get('job_id')
+        if job_id in self.deleted_jobs or job_id in self.pending_deletions:
+            return
+        if job_id in self.deleted_jobs or job_id in self.pending_deletions:
+            return
         self.job_capreg_allocated[job_id] = True  # Mark that we've allocated resources for this job
         instance = message.get('instance', {})
         offer_data = next(iter(instance["resource"].values()))

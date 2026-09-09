@@ -258,7 +258,7 @@ class SwarmchestrateClient:
             result = message.get("result")
 
             if result == "failure":
-                print(f"[ERROR] Job {job_id} deletion failed (not found or already deleted)")
+                print(f"[ERROR] Job {job_id} deletion failed: {message.get('message', 'Unknown error')}")
                 # self.logger.error(
                 #     f"Job {job_id} deletion failed, not found or already deleted"
                 # )
@@ -331,14 +331,15 @@ class SwarmchestrateClient:
 
             # Ze-TODO: should return the exact job id if exists
             if result == "failure":
-                print(f"[ERROR] Job deletion failed (not found or already deleted)")
+                print(f"[ERROR] Job deletion failed: {message.get('message', 'Unknown error')}")
                 # self.logger.error(
                 #     f"Job {job_id} deletion failed, not found or already deleted"
                 # )
-                self.stop_client()
+                if last_job:
+                    self.stop_client()
                 return
 
-            print(f"[DEBUG] Jobs are all deleted")
+            print(f"[DEBUG] Job {job_id} deletion completed")
             self.logger.info(f"Job deletion all succeeded")
             if last_job:
                 self.stop_client()
