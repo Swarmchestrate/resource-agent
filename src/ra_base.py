@@ -127,11 +127,11 @@ class ResourceAgent:
 
 
         if self.ra_cap_id:
-            self.logger.info(f"RA{self.ra_id}: RA CAP ID is {self.ra_cap_id}")
+            self.logger.info(f"RA-{self.ra_id}: RA CAP ID is {self.ra_cap_id}")
             download = KBClient.download_CDT_from_KB(self.ra_cap_id)
             if download["success"]:
-                self.logger.info(f"RA{self.ra_id}: CDT {self.ra_cap_id} {download['filename']} downloaded successfuly from KB")
-                self.logger.info(f"RA{self.ra_id}: {download['data']}")
+                self.logger.info(f"RA-{self.ra_id}: CDT {self.ra_cap_id} {download['filename']} downloaded successfuly from KB")
+                self.logger.info(f"RA-{self.ra_id}: {download['data']}")
                 parsed_capacity = yaml.safe_load(download['data'])
                 # Ze-DONE: capacity_content
                 capacity_content = download['data']
@@ -144,13 +144,13 @@ class ResourceAgent:
                 cap_id_in_cdt = cdt.get_cap_id()
                 # Ze-DONE: verify the downloaded CDT's CAP ID with the provided cap_id
                 if cap_id_in_cdt != self.ra_cap_id:
-                    self.logger.error(f"RA{self.ra_id}: CDT {self.ra_cap_id} CAP ID mismatch: {cap_id_in_cdt}")
-                    raise Exception(f"RA{self.ra_id}: CDT {self.ra_cap_id} CAP ID mismatch: {cap_id_in_cdt}")
+                    self.logger.error(f"RA-{self.ra_id}: CDT {self.ra_cap_id} CAP ID mismatch: {cap_id_in_cdt}")
+                    raise Exception(f"RA-{self.ra_id}: CDT {self.ra_cap_id} CAP ID mismatch: {cap_id_in_cdt}")
                 else:
-                    self.logger.info(f"RA{self.ra_id}: CDT {self.ra_cap_id} CAP ID verified successfully")
+                    self.logger.info(f"RA-{self.ra_id}: CDT {self.ra_cap_id} CAP ID verified successfully")
             # Ze-DONE: no online resource then we go for offline submitted by the user
             else:
-                self.logger.error(f"RA{self.ra_id}: Download from KB failed: {download['error']}, the CDT file may not exist in KB, try finding from local input and uploading it to KB")
+                self.logger.error(f"RA-{self.ra_id}: Download from KB failed: {download['error']}, the CDT file may not exist in KB, try finding from local input and uploading it to KB")
                 if self.capacity_file:
                     with open(self.capacity_file) as stream:
                         try:
@@ -160,14 +160,14 @@ class ResourceAgent:
                     parsed_capacity = yaml.safe_load(capacity_content)
                     upload = KBClient.upload_CDT_to_KB(self.ra_cap_id, parsed_capacity)
                     if upload["success"]:
-                        self.logger.info(f"RA{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
+                        self.logger.info(f"RA-{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
                     else:
-                        self.logger.error(f"RA{self.ra_id}: Upload to KB failed: {upload['error']}")
+                        self.logger.error(f"RA-{self.ra_id}: Upload to KB failed: {upload['error']}")
                 else:
-                    self.logger.error(f"RA{self.ra_id}: No capacity_file specified, cannot load CDT")
+                    self.logger.error(f"RA-{self.ra_id}: No capacity_file specified, cannot load CDT")
                     raise Exception("No capacity_file specified, cannot load CDT")
         else:
-            self.logger.warning(f"RA{self.ra_id}: No RA CAP ID specified, trying to load from local capacity_file")
+            self.logger.warning(f"RA-{self.ra_id}: No RA CAP ID specified, trying to load from local capacity_file")
             if self.capacity_file:
                 with open(self.capacity_file) as stream:
                     try:
@@ -177,11 +177,11 @@ class ResourceAgent:
                 parsed_capacity = yaml.safe_load(capacity_content)
                 upload = KBClient.upload_CDT_to_KB(self.ra_cap_id, parsed_capacity)
                 if upload["success"]:
-                    self.logger.info(f"RA{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
+                    self.logger.info(f"RA-{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
                 else:
-                    self.logger.error(f"RA{self.ra_id}: Upload to KB failed: {upload['error']}")
+                    self.logger.error(f"RA-{self.ra_id}: Upload to KB failed: {upload['error']}")
             else:
-                self.logger.error(f"RA{self.ra_id}: No capacity_file specified, cannot load CDT")
+                self.logger.error(f"RA-{self.ra_id}: No capacity_file specified, cannot load CDT")
                 raise Exception("No capacity_file specified, cannot load CDT")
 
     
