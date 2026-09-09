@@ -1,0 +1,138 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=25mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage[hidelinks]{hyperref}
+
+\title{Why the TKG Decrypts Utility Coordinates for Borda Ranking}
+\author{Resource Agent Project}
+\date{September 2026}
+
+\begin{document}
+\maketitle
+
+\section{Short answer}
+
+The Trusted Key Generator (TKG) can decrypt individual bounded utility
+coordinates because Borda ranking is a global comparison operation. It must
+compare every candidate's value for each metric before it can assign ranks.
+The current IPFE primitive evaluates linear inner products, but sorting and
+comparison are nonlinear operations.
+
+This gives privacy from the Hub and peer Resource Agents (RAs), but not from
+the TKG. The TKG is trusted with the bounded utility values in the current
+protocol.
+
+\section{Coordinate decryption}
+
+An RA converts its raw QoS values into a direction-aware bounded utility vector:
+
+\[
+  x_i=(x_{i1},\ldots,x_{im}),
+\]
+
+and sends only an IPFE ciphertext $C_i=\operatorname{Enc}(x_i)$ to the Hub.
+The TKG owns the master secret and derives a unit-vector functional key
+$sk_{e_j}$ for every metric $j$. IPFE then gives:
+
+\begin{equation}
+  \operatorname{Dec}_{sk_{e_j}}(C_i)
+  =\langle x_i,e_j\rangle
+  =x_{ij},
+\end{equation}
+
+where $e_j$ is the vector with $1$ at coordinate $j$ and $0$ elsewhere.
+Therefore, the TKG can recover each bounded utility coordinate separately.
+
+\section{Why Borda requires this access}
+
+For a candidate combination $c$, the TKG first aggregates the offers belonging
+to that combination:
+
+\begin{equation}
+  u_{cj}=\sum_{i\in c}x_{ij}.
+\end{equation}
+
+For every metric, Borda ranking compares all $N$ candidates. The implemented
+maximum-position rank is:
+
+\begin{equation}
+  r_{cj}=\left|\left\{d\in\{1,\ldots,N\}:u_{dj}\leq u_{cj}\right\}\right|.
+\end{equation}
+
+The rank of candidate $c$ therefore depends on the values of every other
+candidate $d$. The TKG must know the aggregate utilities to perform these
+comparisons, handle ties, and construct the encrypted rank matrix.
+
+Standard IPFE computes a function of the form
+
+\begin{equation}
+  \langle x,y\rangle=\sum_jx_jy_j,
+\end{equation}
+
+but it does not directly compute sorting, less-than comparisons, or Borda
+ranks. Those are nonlinear global operations.
+
+\section{What the Hub learns}
+
+After the TKG constructs the rank vector
+
+\[
+  r_c=(r_{c1},\ldots,r_{cm}),
+\]
+
+it encrypts that vector again. The Hub receives a functional key for the
+configured integer priority vector $w$ and learns only:
+
+\begin{equation}
+  S_c=\operatorname{Dec}_{sk_w}(\operatorname{Enc}(r_c))
+      =\langle r_c,w\rangle.
+\end{equation}
+
+The Hub can compare the scalar scores and select:
+
+\begin{equation}
+  c^*=\arg\max_c S_c,
+\end{equation}
+
+but it cannot use that functional key to decrypt an individual QoS coordinate
+or an individual rank coordinate.
+
+\section{Privacy boundary}
+
+The protocol provides the following boundary:
+
+\begin{itemize}
+  \item Worker RAs hide plaintext QoS characteristics from the Hub and peer
+        RAs.
+  \item The Hub learns public offer metadata, feasible combinations, every
+        weighted candidate score, and the selected index.
+  \item The TKG sees bounded utility coordinates, aggregate values, ownership,
+        trust scores, and Borda ranks.
+\end{itemize}
+
+Thus the statement ``private ranking'' means private from the Hub and peer RAs;
+it does not mean private from the TKG. The TKG is a trusted party in this
+version of the protocol.
+
+\section{If the TKG must not see utility values}
+
+The current design is not sufficient if the TKG must also be prevented from
+seeing individual utilities. Possible alternatives include:
+
+\begin{enumerate}
+  \item secure multiparty computation for aggregation and comparisons;
+  \item threshold or multiparty functional encryption;
+  \item trusted execution environments with remote attestation; or
+  \item replacing Borda with a scoring function that remains linear and can be
+        evaluated directly by IPFE.
+\end{enumerate}
+
+The last option avoids coordinate decryption but changes the ranking semantics.
+Keeping exact Borda semantics while hiding values from every single party
+requires a stronger multiparty construction.
+
+\end{document}
