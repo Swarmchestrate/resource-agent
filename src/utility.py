@@ -1,5 +1,6 @@
 # utility.py
 import yaml
+import re
 from pathlib import Path
 
 """
@@ -12,6 +13,24 @@ prepare Kubernetes ConfigMaps that contains TOSCA files.
 prepare Kubernetes ConfigMaps that configures Swarm Agent.
  
 """
+
+def validate_microservice_names(data: dict):
+    """Reject microservice names that cannot be Kubernetes Service names."""
+    nodes = data.get('service_template', {}).get('node_templates', {})
+    invalid = [
+        name for name, node in nodes.items()
+        if node.get('type') == 'swch:Microservice'
+        and (not isinstance(name, str) or len(name) > 63
+             or re.fullmatch(r'[a-z](?:[a-z0-9-]*[a-z0-9])?', name) is None)
+    ]
+    if invalid:
+        raise ValueError(
+            f"Invalid microservice name(s): {', '.join(repr(name) for name in invalid)}. "
+            "Names must contain 1–63 lowercase letters, digits or hyphens, "
+            "start with a letter and end with a letter or digit "
+            "(for example, 'service-a' instead of 'service_a')."
+        )
+
 
 def dict_to_yaml(data: dict, filename: str):
     """
