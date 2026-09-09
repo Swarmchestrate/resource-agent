@@ -53,7 +53,7 @@ def main(config_file, capacity_file):
         if 'ra' in locals():
             ra.stop()
     except Exception as e:
-        print(f"Error starting {ra.ra_id}: {e}")
+        print(f"Error starting ResourceAgent with config_file={config_file} and capacity_file={capacity_file}: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
