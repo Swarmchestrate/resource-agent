@@ -42,6 +42,7 @@ from offer_evaluator import OfferEvaluator
 # RA utility functions
 from dotenv import load_dotenv
 from utility import dict_to_yaml as write_yaml
+from utility import validate_microservice_names
 from utility import extract_qos_priorities as get_qos_priorities
 from utility import generate_tosca_configmap as write_tosca_configmap
 from utility import generate_swarm_configmap as write_swarm_configmap
@@ -521,9 +522,10 @@ class ResourceAgent:
         # initialise application tosca
         self.job_tosca[job_id] = ask_yaml
 
-        write_yaml(ask_yaml, 'tosca.yaml')
         # Ze-done: Using TOSCA library to validate and parse the tosca then extract resource requirements
         try:
+            validate_microservice_names(ask_yaml)
+            write_yaml(ask_yaml, 'tosca.yaml')
             # 1) (done) validate and parse
             self.tosca[job_id] = Sardou('tosca.yaml') #(to validate, may fail if invalid)
             print(f"✅ Successfully validated submitted application tosca for job {job_id}")
@@ -593,6 +595,12 @@ class ResourceAgent:
         except Exception as e:
             print(f"❌ Failed to process tosca.yaml: {e}")
             self._update_job_state(job_id, new_state="Invalid")
+            self.peer.send(peer_id, "MSG_SUBMIT_RESPONSE", {
+                "job_id": job_id,
+                "ra_id": self.ra_id,
+                "result": "failure",
+                "message": str(e),
+            })
             return None
   
 
