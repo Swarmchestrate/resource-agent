@@ -132,9 +132,10 @@ class ResourceAgent:
             if download["success"]:
                 self.logger.info(f"RA-{self.ra_id}: CDT {self.ra_cap_id} {download['filename']} downloaded successfuly from KB")
                 self.logger.info(f"RA-{self.ra_id}: {download['data']}")
-                parsed_capacity = yaml.safe_load(download['data'])
+                # Ze: downloaded data is dict
+                parsed_capacity = download['data']
                 # Ze-DONE: capacity_content
-                capacity_content = download['data']
+                capacity_content = yaml.safe_dump(parsed_capacity, sort_keys=False)
                 # Ze-DONE: save the downloaded CDT to local file
                 with open(f"cdt_{self.ra_cap_id}_tmp.yaml", "w") as f:
                     f.write(capacity_content)
@@ -175,7 +176,8 @@ class ResourceAgent:
                     except yaml.YAMLError as exc:
                         print(exc)
                 parsed_capacity = yaml.safe_load(capacity_content)
-                upload = KBClient.upload_CDT_to_KB(self.ra_cap_id, parsed_capacity)
+                # Ze: in the case of no cap_id, we upload with ra_id
+                upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
                 if upload["success"]:
                     self.logger.info(f"RA-{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
                 else:
