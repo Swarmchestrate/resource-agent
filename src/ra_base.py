@@ -571,6 +571,7 @@ class ResourceAgent:
             all_ras = self.peer.find_peers({"peer_type": "RA"})
             if not ask_yaml:
                 raise ValueError("No resource requirements in application submission")
+                
 
             # Hub RA processes resource requirements and broadcasts to other RAs
             if not self.bootstrap_peers:
@@ -1427,6 +1428,7 @@ class ResourceAgent:
                     self.capreg.resource_offer_reject(offer_id, offer)
                     
 
+        self.logger.info(f"RA {self.ra_id} updated the capacity registry based on the selected offer")
         self.capreg.dump_capacity_registry_info()
 
 
