@@ -1,0 +1,3 @@
+[submodule "ipfe_resource_ranking"]
+	path = ipfe_resource_ranking
+	url = git@github.com:hosseinabdinf/ipfe_resource_ranking.git

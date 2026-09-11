@@ -26,6 +26,7 @@ import requests
 from datetime import datetime
 
 from http.client import responses
+import numpy as np
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from itertools import product
@@ -35,9 +36,14 @@ from swchp2pcom import SwchPeer
 from cluster_builder import Swarmchestrate
 from sardou import Sardou
 
+# IPFE private ranking (submodule)
+_IPFE_DIR = Path(__file__).resolve().parent.parent / "ipfe_resource_ranking"
+if str(_IPFE_DIR) not in sys.path:
+    sys.path.insert(0, str(_IPFE_DIR))
+from private_protocol import decrypt_combination_scores, encrypt_offer_values
+
 # TOSCA evaluation functions
 from capability_evaluator import can_fulfill_requirement, get_matching_instances
-from offer_evaluator import OfferEvaluator
 
 # RA utility functions
 from dotenv import load_dotenv
@@ -77,6 +83,8 @@ class ResourceAgent:
         self.job_responses = {} # store the resource responses from RAs for each job [job_id][ra_id]
         self.job_clients = {} # store the client_id for each job [job_id]
         self.job_capreg_allocated = {} # store the allocated job IDs for each job [job_id]
+        self.private_ranking_jobs = {} # Hub-only functional keys and public contexts
+        self.private_ranking_public = {} # public encryption context received per job
 
         self.master_info = {} # store the master info for each job [job_id]{ip, port, k3s_token}
         self.job_offers = {} # job_offer stores the offer that fulfills a job request [job_id][]
@@ -95,6 +103,10 @@ class ResourceAgent:
         self.credentials = self.config.get('credentials', {})
         self.hub_ra_ip = self.config.get('hub_ra_ip', '')
         self.trust_store = TrustStore()
+        self.tkg_url = _os.getenv(
+            "IPFE_TKG_URL",
+            _os.getenv("IPFE_AUTHORITY_URL", "http://trusted-key-generator:8000"),
+        ).rstrip("/")
 
         # Setup logging
         self._setup_logging()
@@ -197,7 +209,8 @@ class ResourceAgent:
         #    except yaml.YAMLError as exc:
         #        print(exc)
         self.capreg.initialize_capacity_by_content(capacity_content)
-        
+        self._normalize_network_allow_case()
+
         self.capacity = self._load_config(capacity_file) if capacity_file else {}
         print(f"[DEBUG] Loaded capacity for RA {self.config.get('RA_id')}: {self.capacity}")
         #print(f"[DEBUG] Capacity registry info for RA {self.config.get('RA_id')}:")
@@ -259,6 +272,34 @@ class ResourceAgent:
             logging.error(f"Error loading config {config_file}: {e}")
             return {}
 
+    def _normalize_network_allow_case(self):
+        """Lowercase string members of the network explicit allow-lists in the
+        parsed capacity registry.
+
+        swchcapreg's expression evaluator lowercases the requirement side of a
+        node_filter (e.g. ['ALL', 80] -> ['all', 80]) but compares it against the
+        capacity value verbatim. The TOSCA profile injects an uppercase 'ALL'
+        sentinel, so 'all' in ['ALL'] is False and every host requirement that
+        carries a network allow-list silently fails to match. Normalizing the
+        capacity side to lowercase makes the comparison case-insensitive on both
+        ends. Non-string entries (port numbers) are left untouched.
+        """
+        cap = getattr(self.capreg, "capacity", None) or {}
+        flavour_groups = []
+        if "cloud" in cap and "flavours" in cap.get("cloud", {}):
+            flavour_groups.append(cap["cloud"]["flavours"])
+        if "edge" in cap and "capacities" in cap.get("edge", {}):
+            flavour_groups.append(cap["edge"]["capacities"])
+
+        for flavours in flavour_groups:
+            for flavour in flavours.values():
+                if not isinstance(flavour, dict):
+                    continue
+                for key in ("network.explicit-tcp-allow", "network.explicit-udp-allow"):
+                    entries = flavour.get(key)
+                    if isinstance(entries, list):
+                        flavour[key] = [e.lower() if isinstance(e, str) else e for e in entries]
+
     def _setup_logging(self):
         """Setup logging configuration"""
         logging.basicConfig(
@@ -266,6 +307,82 @@ class ResourceAgent:
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         self.logger = logging.getLogger(f"RA-{self.ra_id}")
+
+    def _qos_priorities_for_job(self, job_id):
+        qos_priority = get_qos_priorities(self.tosca[job_id].get_qos())
+        if qos_priority:
+            return {name: float(value) for name, value in qos_priority.items()}
+        return {
+            "reliability": 1.0,
+            "latency": 1.0,
+            "energy": 1.0,
+            "bandwidth": 1.0,
+            "price": 1.0,
+        }
+
+    def _create_private_ranking_job(self, job_id):
+        """Ask the TKG for public and functional job keys."""
+        response = requests.post(
+            f"{self.tkg_url}/v1/jobs",
+            json={
+                "job_id": job_id,
+                "qos_priority": self._qos_priorities_for_job(job_id),
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        material = response.json()
+        if "public_context" not in material or "functional_key" not in material:
+            raise ValueError("Trusted Key Generator returned incomplete key material")
+        self.private_ranking_jobs[job_id] = material
+        self.private_ranking_public[job_id] = material["public_context"]
+        return material["public_context"]
+
+    def _encrypt_resource_offers(self, job_id, offers, public_context):
+        """Remove plaintext QoS characteristics and attach one IPFE ciphertext."""
+        protected = {}
+        for microservice_id, resource_offers in offers.items():
+            if not isinstance(resource_offers, dict):
+                protected[microservice_id] = resource_offers
+                continue
+            protected[microservice_id] = {}
+            for offer_id, offer in resource_offers.items():
+                if not isinstance(offer, dict) or "ids" not in offer or "characteristics" not in offer:
+                    protected[microservice_id][offer_id] = offer
+                    continue
+                characteristics = offer["characteristics"]
+                raw_values = {
+                    # The TKG replaces this placeholder with its trusted score
+                    # before ranking; an RA cannot self-assert reliability.
+                    "reliability": 0.0,
+                    "energy": float(characteristics.get("energy.consumption", 0)),
+                    "bandwidth": float(characteristics.get("host.bandwidth", 0)),
+                    "latency": float(characteristics.get("latency", 1)),
+                    "price": float(characteristics.get("pricing.cost", 0)),
+                }
+                public_offer = {
+                    key: value for key, value in offer.items()
+                    if key != "characteristics"
+                }
+                public_offer["encrypted_qos"] = encrypt_offer_values(
+                    raw_values, public_context
+                )
+                public_offer["private_ranking"] = {
+                    "key_id": public_context["key_id"],
+                    "config_id": public_context["config_id"],
+                }
+                protected[microservice_id][offer_id] = public_offer
+        return protected
+
+    def _local_offer(self, job_id, microservice_id, offer_id):
+        """Resolve full private offer from this RA's capacity registry."""
+        offers = self.capreg.resource_offer_query_all(job_id)
+        try:
+            return offers[microservice_id][offer_id]
+        except KeyError as exc:
+            raise ValueError(
+                f"Local offer {offer_id} for {microservice_id} is unavailable"
+            ) from exc
 
     def initialize_peer(self):
         """Initialize P2P peer with configuration"""
@@ -558,6 +675,7 @@ class ResourceAgent:
             if not ask_yaml:
                 self.logger.error("No ask_yaml data in application submission")
                 return
+            private_ranking_context = self._create_private_ranking_job(job_id)
 
             # Hub RA processes resource requirements and broadcasts to other RAs
             if not self.bootstrap_peers:
@@ -575,7 +693,8 @@ class ResourceAgent:
                     #"ask_yaml" : self.job_tosca[job_id], #"tosca.yaml", #/ rm ask_yaml = self.tosca[job_id].get_requirements()
                     #"ask_yaml": ask_yaml,
                     "timestamp": message.get('timestamp'),
-                    "hub_ra": self.peer.peer_id
+                    "hub_ra": self.peer.peer_id,
+                    "private_ranking": private_ranking_context,
                     #"hub_ra": self.ra_id
                 }
 
@@ -585,7 +704,10 @@ class ResourceAgent:
                     self.logger.info(f"Broadcasted application to {ra_id}")
 
                 # Process locally as well
-                self._process_job_requirements(job_id, client_id, save_path, self.peer.peer_id)
+                self._process_job_requirements(
+                    job_id, client_id, save_path, self.peer.peer_id,
+                    private_ranking_context,
+                )
             else:
                 self.logger.warning("Non-hub RA received direct job submission")
         except Exception as e:
@@ -764,6 +886,10 @@ class ResourceAgent:
             self.logger.error(f"RA{self.ra_id}: Download from KB failed: {ask_yaml['error']}")
 
         hub_ra = message.get('hub_ra')
+        private_ranking_context = message.get('private_ranking')
+        if not private_ranking_context:
+            raise ValueError("Job broadcast is missing private-ranking context")
+        self.private_ranking_public[job_id] = private_ranking_context
         all_ras = self.peer.find_peers({"peer_type": "RA"})
 
         save_path = f"./KB/tosca_{job_id}.yaml"
@@ -772,10 +898,15 @@ class ResourceAgent:
         print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
         
         # Process job requirements
-        self._process_job_requirements(job_id, client_id, save_path, hub_ra)
+        self._process_job_requirements(
+            job_id, client_id, save_path, hub_ra, private_ranking_context
+        )
 
     # cap-lib-DONE: replace this _process_job_requirements func to support cap-lib
-    def _process_job_requirements(self, job_id: str, client_id: str, ask_yaml: str, hub_ra: str):
+    def _process_job_requirements(
+        self, job_id: str, client_id: str, ask_yaml: str, hub_ra: str,
+        private_ranking_context: dict,
+    ):
         self.logger.info(f"RA: {self.ra_id} Evaluating application {job_id} requirements")
 
         if not self.capacity:
@@ -785,6 +916,9 @@ class ResourceAgent:
         self.capreg.dump_capacity_registry_info()
         offers = self.capreg.resource_offer_generate_from_SAT_file(job_id, ask_yaml)
         print(yaml.dump(offers))
+        protected_offers = self._encrypt_resource_offers(
+            job_id, offers, private_ranking_context
+        )
     # Ze-comment: by far each RA returns its offer
     # offers should be sent to the main RA now!
        # Send consolidated response to client
@@ -793,7 +927,7 @@ class ResourceAgent:
            "ra_id": self.ra_id,
            "provider": self.capacity.get('metadata', {}).get('resource-provider'),
            "timestamp": time.time(),
-           "responses": offers
+           "responses": protected_offers
         }
 
         all_ras = self.peer.find_peers({"peer_type": "RA"})
@@ -1066,7 +1200,7 @@ class ResourceAgent:
             
             # row = f"{ra_id} ({provider})"[:29].ljust(30)
             row = f"{ra_id} "[:29].ljust(30)
-            # implement logic that answer is yes if resource is in the response and has 'ids' and 'characteristics' keys, otherwise is no
+            # An available private offer has public identifiers and encrypted QoS.
 
             for resource_name in resource_names:
                 answer = "No"
@@ -1076,7 +1210,7 @@ class ResourceAgent:
                     # ignore colocated-only entries
                     if not ("colocated" in resource_data and len(resource_data) == 1):
                         if any(
-                            isinstance(v, dict) and "ids" in v and "characteristics" in v
+                            isinstance(v, dict) and "ids" in v and "encrypted_qos" in v
                             for v in resource_data.values()
                         ):
                             answer = "Yes"
@@ -1104,24 +1238,6 @@ class ResourceAgent:
 
         # print(f"[DEBUG] Testing valid combinations loaded from file: {filename}")
         
-        # Trust Score Ze: now we have all valid combinations, we need to retrieve the trust scores of each RA / or shall we update CDT with trust score so that they are embedded in the resource offer? For now, we will retrieve the trust score from CDT for each RA in the valid combinations
-
-
-        ra_ids = set()
-        for combination_data in valid_combinations.values():
-            for ms_id, offers in combination_data.items():
-                for offer_id, resource_data in offers.items():
-                    ra_id = resource_data.get('ids', {}).get('ra_id')
-                    if ra_id:
-                        ra_ids.add(ra_id)
-        print(f"[DEBUG] RA IDs extracted from valid combinations: {ra_ids}")
-        # We get the list of trust scores from OptimusDB
-        trust_scores = {ra_id: self.trust_store.get_trust_score(ra_id, default=1.0) for ra_id in ra_ids}
-        print(f"[DEBUG] Trust scores retrieved from OptimusDB: {trust_scores}")
-
-
-
-
         if valid_combinations:
             print(f"Found {len(valid_combinations)} valid combination(s):")
             print("-" * 60)
@@ -1130,10 +1246,6 @@ class ResourceAgent:
             # Use .values() to get the dictionary data, not just the "combination_1" string
             for i, combination in enumerate(valid_combinations.values(), 1):
                 resource_items = []
-                energy_consumption = 0
-                total_bandwidth = 0
-                total_price = 0
-                total_reliability = 0
                 # combination.keys() are now "details_v1", "ratings_v1", etc.
                 for ms_id in sorted(combination.keys()):
                     # This is the inner dict (e.g., the "ra-fuelics..." key)
@@ -1141,22 +1253,12 @@ class ResourceAgent:
                     
                     for offer_id, data in offers.items():
                         ids = data['ids']
-                        chars = data['characteristics']
-                        
-                        # Update totals using the 'characteristics' keys from your JSON
-                        energy_consumption += chars.get('energy.consumption', 0)
-                        total_price += chars.get('pricing.cost', 0)
-                        total_reliability += trust_scores.get(ids.get('ra_id', ''), 1.0)  # Default to 1.0 if not found
-
-                        # Bandwidth is a string in some JSONs, ensure it's an int
-                        total_bandwidth += int(chars.get('host.bandwidth', 0))
-                        
                         ra_id = ids.get('ra_id', 'unknown')
                         resource_items.append(f"{ms_id}: {ra_id}")
 
                 combo_str = f"{i}. " + ", ".join(resource_items)
                 print(combo_str)
-                print(f"   >> Total energy: {energy_consumption:.2f} | Bandwidth: {total_bandwidth} | Price: {total_price:.2f} | Reliability: {total_reliability:.2f}")
+                print("   >> QoS characteristics encrypted")
             print("-" * 60)
             
             # Randomly select one combination
@@ -1177,33 +1279,18 @@ class ResourceAgent:
             print("=" * 60)
             
             resource_items = []
-            energy_consumption = 0
-            total_bandwidth = 0
-            total_price = 0
-            total_reliability = 0
             for ms_id in sorted(selected_combination.keys()):
                 offers = selected_combination[ms_id]
             
                 # The JSON has an offer_id key (like 'ra-fuelics...') before the data
                 for offer_id, data in offers.items():
                     ids = data.get('ids', {})
-                    chars = data.get('characteristics', {})
-                    
-                    # Check for 'count' safely; use 1 as default if missing
-                    count = data.get('count', 1)
-                    
                     ra_id = ids.get('ra_id', 'unknown')
-                    
-                    # Use the dot-notation keys from your actual JSON characteristics
-                    energy_consumption += chars.get('energy.consumption', 0)
-                    total_price += chars.get('pricing.cost', 0)
-                    total_bandwidth += int(chars.get('host.bandwidth', 0))
-                    total_reliability += trust_scores.get(ids.get('ra_id', ''), 1.0)
                     resource_items.append(f"{ms_id}: {ra_id}")
 
             
             print(", ".join(resource_items))
-            print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}, total price is: {total_price}, total reliability is: {total_reliability:.2f}")
+            print("QoS characteristics remain encrypted from Hub RA")
             print("=" * 60)
         else:
             print(f"No valid resource combinations found for job {job_id}!")
@@ -1283,99 +1370,54 @@ class ResourceAgent:
         return sorted(independent_ms)
 
     def _rank_resource_offers(self,valid_combinations, job_id):
-        """Rank resource offers based on QoS attributes using AI algorithm"""
-        # Ze-done: Using the TOSCA library to fetch QoS priorities and populate them into the qos_priority template.
-        # 1) create a qos_priority template
-        # 2) get the qos_priority from the TOSCA
-        # 3) populate the qos_priority template
+        """Rank encrypted offers without exposing QoS values to the Hub RA."""
+        material = self.private_ranking_jobs.get(job_id)
+        if material is None:
+            raise ValueError("Private-ranking key material is unavailable")
 
-        qos_data = self.tosca[job_id].get_qos()
-        print(f"[DEBUG] qos_data extracted from raw TOSCA is {qos_data}")
-        qos_priority = get_qos_priorities(qos_data)
-        print(f"[DEBUG] qos_priority extracted from TOSCA is {qos_priority}")
-        if not qos_priority:
-            print("[WARN] No QoS priorities found in TOSCA, using default priorities")
-            qos_priority = {
-                "reliability": 1,
-                "latency": 1,
-                "energy": 1,
-                "bandwidth": 1,
-                "price": 1
-            }
-        reliability_list = []
-        latency_list = []
-        energy_list = []
-        bandwidth_list = []
-        price_list = []
-
-        # Ze-TODO: we need trust score for each RA stores as a dict
-        # We get the list of RAs from the valid_combinations
-        ra_ids = set()
+        encrypted_offers = {}
+        offer_owners = {}
+        combinations = []
         for combination_data in valid_combinations.values():
-            for ms_id, offers in combination_data.items():
-                for offer_id, resource_data in offers.items():
-                    ra_id = resource_data.get('ids', {}).get('ra_id')
-                    if ra_id:
-                        ra_ids.add(ra_id)
-        print(f"[DEBUG] RA IDs extracted from valid combinations: {ra_ids}")
-        # We get the list of trust scores from OptimusDB
-        trust_scores = {ra_id: self.trust_store.get_trust_score(ra_id, default=1.0) for ra_id in ra_ids}
-        print(f"[DEBUG] Trust scores retrieved from OptimusDB: {trust_scores}")
-        # Ze: for each combination we calculate its qos
-        for combination_data in valid_combinations.values():
-            total_energy = 0
-            total_bandwidth = 0
-            total_price = 0
-            total_reliability = 0
+            offer_ids = []
+            for microservice_id, offers in combination_data.items():
+                for offer_id, offer in offers.items():
+                    private_metadata = offer.get("private_ranking", {})
+                    context = material["public_context"]
+                    if (private_metadata.get("key_id") != context["key_id"]
+                            or private_metadata.get("config_id") != context["config_id"]):
+                        raise ValueError("Offer uses wrong private-ranking context")
+                    token = json.dumps([
+                        offer.get("ids", {}).get("ra_id"),
+                        microservice_id,
+                        offer_id,
+                    ], separators=(",", ":"))
+                    owner = offer.get("ids", {}).get("ra_id")
+                    if not owner:
+                        raise ValueError("Encrypted offer is missing RA owner")
+                    encrypted_offers[token] = offer["encrypted_qos"]
+                    offer_owners[token] = owner
+                    offer_ids.append(token)
+            combinations.append(offer_ids)
 
-            # Ze: we sum the total qos consumption of each combination
-            for ms_id, offers in combination_data.items():
-                for offer_id, resource_data in offers.items():
-                    chars = resource_data.get('characteristics', {})
-                    
-                    total_energy += chars.get('energy.consumption', 0)
-                    total_bandwidth += int(chars.get('host.bandwidth', 0))
-                    total_price += chars.get('pricing.cost', 0)
-                    # Ze-TODO:
-                    ra_id = resource_data.get('ids', {}).get('ra_id')
-                    if ra_id:
-                        trust_score = trust_scores.get(ra_id, 1.0)  # Default to 1.0 if not found
-                    else:
-                        trust_score = 1.0
-                    total_reliability += trust_score
-
-                    # ra_id = resource_data.get('ids', {}).get('ra_id')
-                    # total reliability += trust_scores.get(ra_id, 1) # Default to 1 if not found
-            # Ze-TODO: seems a problem with ranking, we want low energy, high bandwidth, low price, high reliability, low latency. 
-            # So we need to negate the values for energy and price to make them maximization problems.
-            energy_list.append(total_energy)
-            bandwidth_list.append(total_bandwidth)
-            price_list.append(total_price)
-            # Ze-TODO: here we assume reliability and latency are not present in RA's CDT
-            reliability_list.append(total_reliability)
-            print(f"[DEBUG] total_reliability for combination is {total_reliability}")
-            latency_list.append(1)
-
-
-        offer_data = {
-            "qos_priority": qos_priority,
-            "reliability": reliability_list,
-            "energy": energy_list,
-            "bandwidth": bandwidth_list,
-            "latency": latency_list,
-            "price": price_list
-        }
-
-        # Save offer data to a JSON file for debugging
-        with open("rank-format.json", "w") as f:
-            json.dump(offer_data, f, indent=2)
-
-        # Ze: AI ranking algorithm takes qos_priority and qos values of each offer combination as input.
-        evaluator = OfferEvaluator(offer_data)
-        #optimal_index = evaluator.rank_offers_without_reliability()
-        optimal_index = evaluator.rank_offers_with_reliability_addition()
-        # Return first item if optimal_index is not empty
-        return optimal_index[0]
+        response = requests.post(
+            f"{self.tkg_url}/v1/jobs/{job_id}/rank",
+            json={
+                "encrypted_offers": encrypted_offers,
+                "combinations": combinations,
+                "offer_owners": offer_owners,
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        encrypted_batch = response.json()
+        scores = decrypt_combination_scores(
+            material["public_context"],
+            material["functional_key"],
+            encrypted_batch,
+        )
+        print(f"[PRIVATE RANKING] Decrypted combination scores: {scores.tolist()}")
+        return int(np.argmax(scores))
 
     def _find_valid_combinations(self, offers_dict, resources_list):
 
@@ -1506,7 +1548,9 @@ class ResourceAgent:
             print(f"offer_info received by LR is {lead_resource_offer} \n")
             ms_name = next(iter(lead_resource_offer))
             offer_id = next(iter(lead_resource_offer[ms_name]))
-            lead_resource_ids = lead_resource_offer[ms_name][offer_id]
+            local_offer = self._local_offer(job_id, ms_name, offer_id)
+            lead_resource_offer = {ms_name: {offer_id: local_offer}}
+            lead_resource_ids = local_offer
 
             # Get a Sardou object of the CDT
             cdt = Sardou(self.capacity_file)
@@ -1529,7 +1573,9 @@ class ResourceAgent:
             if cloud_type == "edge":
                 cloud = cloud_type
             else:
-                cloud = lead_resource_ids["ids"]["provider_id"]
+                cloud = node_info.get(
+                    "cloud", lead_resource_ids["ids"]["provider_id"]
+                )
                 if cloud == "openstack":
                     ssh_key_path = node_info.get("key_name", "")
             print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
@@ -1917,14 +1963,16 @@ class ResourceAgent:
         job_id = message.get('job_id')
         self.job_capreg_allocated[job_id] = True  # Mark that we've allocated resources for this job
         instance = message.get('instance', {})
-        offer_data = next(iter(instance["resource"].values()))
+        public_offer = next(iter(instance["resource"].values()))
+        public_ids = public_offer["ids"]
+        resource_name = public_ids["ms_id"]
+        offer_data = self._local_offer(job_id, resource_name, public_ids["offer_id"])
     
         print(f"[DEBUG]  Offer_data is: mainly to check whether there is resource count? \n {offer_data} \n")
         
         # 2. Reach into the "ids" block to get the ra_id
         k3s_role = instance["k3s_role"]
        #resource_name = instance["node-name"]
-        resource_name = offer_data["ids"]["ms_id"]
         self.master_info = message.get('master_info')
         cluster_name = self.master_info["cluster_name"]
         master_ip = self.master_info["master_ip"]
@@ -1956,7 +2004,7 @@ class ResourceAgent:
         if cloud_type == "edge":
             cloud = cloud_type
         else:
-            cloud = offer_data["ids"]["provider_id"]
+            cloud = node_info.get("cloud", offer_data["ids"]["provider_id"])
             if cloud == "openstack":
                 ssh_key_path = node_info.get("key_name", "")
         

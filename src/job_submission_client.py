@@ -299,12 +299,13 @@ class SwarmchestrateClient:
         try:
             self.peer.enter(hub_host, hub_port).addCallback(lambda _: on_entered())
             self.peer.start()
- 
+
         except Exception as e:
             self.logger.error(f"Failed to connect: {e}")
             return False
-            
-            
+
+
+
     def delete_job_all(self, hub_host="", hub_port=5000, gw_RA_id=""):
         """Delete all jobs from RA network via hub"""
         print("Swarmchestrate Job Deletion Client")
@@ -380,6 +381,7 @@ class SwarmchestrateClient:
     
     def submit_job(self, tosca_path, hub_host="", hub_port=5000, gw_RA_id=""):
         """Submit job to RA network via hub"""
+        self._submit_success = False
         ask_data = self.load_tosca(tosca_path)
 
         if not ask_data:
@@ -414,6 +416,7 @@ class SwarmchestrateClient:
                 self.stop_client()
                 return
 
+            self._submit_success = True
             print(f"[DEBUG] Job {job_id} submission succeeded")
             self.logger.info(f"Job {job_id} submission succeeded")
             self.stop_client()
@@ -476,8 +479,7 @@ class SwarmchestrateClient:
             self.logger.error(f"Failed to connect: {e}")
             return False
 
-
-
+        return self._submit_success
 
 
 def main():

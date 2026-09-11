@@ -6,6 +6,8 @@ uvicorn[standard]==0.35.0
 
 # Numpy for ranking
 numpy==2.3.3
+# IPFE private ranking (submodule ipfe_resource_ranking)
+pymife==0.0.14
 
 # Pydantic for data validation
 pydantic==2.11.7

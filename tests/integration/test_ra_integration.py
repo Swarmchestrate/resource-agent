@@ -18,8 +18,12 @@ REQUEST_PATH = "/app/tests/integration/configs/submit-request.yaml"
 
 if __name__ == "__main__":
     client = SwarmchestrateClient(client_id="test-client")
-    client.handle_client_request(REQUEST_PATH)
+    success = client.handle_client_request(REQUEST_PATH)
 
     print("\n" + "=" * 60, flush=True)
-    print("INTEGRATION TEST PASSED", flush=True)
+    if success:
+        print("INTEGRATION TEST PASSED", flush=True)
+    else:
+        print("INTEGRATION TEST FAILED (job submission did not succeed)", flush=True)
     print("=" * 60, flush=True)
+    sys.exit(0 if success else 1)
