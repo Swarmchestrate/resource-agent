@@ -52,6 +52,7 @@ from trust_store import TrustStore
 
 # KB
 from kb_client import KBClient
+from sat_expansion import expand_sat_counts
 
 #cap-lib-Done:
 from swch_capreg import SwChCapacityRegistry
@@ -745,7 +746,16 @@ class ResourceAgent:
             return
 
         self.capreg.dump_capacity_registry_info()
-        offers = self.capreg.resource_offer_generate_from_SAT_file(job_id, ask_yaml)
+        # All RAs expand the same original SAT locally before matching. Keep the
+        # original file for manifests and save the identity mapping beside it.
+        with open(ask_yaml) as stream:
+            matching_sat, instance_origins = expand_sat_counts(yaml.safe_load(stream))
+        original_path = Path(ask_yaml)
+        matching_path = original_path.with_name(original_path.stem + '.expanded.yaml')
+        write_yaml(matching_sat, str(matching_path))
+        with open(original_path.with_name(original_path.stem + '.instances.json'), 'w') as stream:
+            json.dump(instance_origins, stream, indent=2)
+        offers = self.capreg.resource_offer_generate_from_SAT_file(job_id, str(matching_path))
         print(yaml.dump(offers))
     # Ze-comment: by far each RA returns its offer
     # offers should be sent to the main RA now!
@@ -1220,6 +1230,10 @@ class ResourceAgent:
         yaml = ruamel.yaml.YAML(typ='safe')
         with open(file_path, 'r') as f:
             data = yaml.load(f)
+
+        # Use exactly the same count-one IDs as local offer generation. Reading
+        # the original SAT here also avoids depending on response timing.
+        data, _ = expand_sat_counts(data)
 
         # 1. Get all nodes that are of type swch:Microservice
         node_templates = data.get('service_template', {}).get('node_templates', {})
