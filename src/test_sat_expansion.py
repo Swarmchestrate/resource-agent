@@ -117,7 +117,7 @@ class ExpansionTests(unittest.TestCase):
                     config = builder.return_value.add_node.call_args.args[0]
                     self.assertEqual(config['cluster_name'], 'ra_aws_job')
                     self.assertEqual(config['resource_name'], 'audio-class-2')
-                    self.assertEqual(config['node_labels'], {key: 'audio-class', 'zone': 'uk'})
+                    self.assertEqual(config['node_labels'], [f'{key}=audio-class', 'zone=uk'])
 
     def test_expansion_preserves_original_and_pairs_colocation(self):
         source = example()

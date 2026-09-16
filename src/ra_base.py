@@ -1632,7 +1632,10 @@ class ResourceAgent:
             }[cloud]
             print(f"[DEBUG] master_node string is {master_node}")
             master_node = json.loads(master_node)
-            master_node["node_labels"] = self._get_instance_node_labels(job_id, node_info)
+            master_node["node_labels"] = [
+                f"{key}={value}"
+                for key, value in self._get_instance_node_labels(job_id, node_info).items()
+            ]
 
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             if self.dry_run:
@@ -2061,7 +2064,10 @@ class ResourceAgent:
             print(f"ssh_user is {ssh_user}")
             
             worker_node = json.loads(worker_node)
-            worker_node["node_labels"] = self._get_instance_node_labels(job_id, node_info)
+            worker_node["node_labels"] = [
+                f"{key}={value}"
+                for key, value in self._get_instance_node_labels(job_id, node_info).items()
+            ]
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             if self.dry_run:
                 self.logger.info(f"Dry run enabled. Would create worker node with the following configuration: {json.dumps(worker_node, indent=2)}")
