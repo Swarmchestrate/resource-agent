@@ -33,7 +33,8 @@ def agent_class():
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef)
                and node.name == 'ResourceAgent')
     names = {'_process_job_requirements', '_get_independent_microservices',
-             '_find_valid_combinations'}
+             '_find_valid_combinations', '_get_instance_node_labels',
+             '_handle_create_lead_resource', '_handle_create_resource_blocking'}
     cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
                 and node.name in names]
     # JSON is a YAML subset; use it to exercise file plumbing without PyYAML.
@@ -47,6 +48,76 @@ def agent_class():
 
 
 class ExpansionTests(unittest.TestCase):
+    def test_labels_restore_only_known_instances_and_preserve_other_labels(self):
+        agent = agent_class()()
+        scope = agent._get_instance_node_labels.__globals__
+        key = 'labels.swarmchestrate.eu/ms_id'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'KB').mkdir()
+            (root / 'KB/tosca_job.instances.json').write_text(json.dumps({
+                'audio-class-2': 'audio-class', 'frontend-10': 'frontend',
+                'service-2': 'service-2'}))
+            scope['Path'] = lambda value: root / value
+            for instance, expected in [('audio-class-2', 'audio-class'),
+                                       ('frontend-10', 'frontend'),
+                                       ('service-2', 'service-2'), ('unknown-3', 'unknown-3')]:
+                info = {'node_labels': {key: instance, 'zone': 'uk'}}
+                original = deepcopy(info)
+                self.assertEqual(agent._get_instance_node_labels('job', info),
+                                 {key: expected, 'zone': 'uk'})
+                self.assertEqual(info, original)
+            self.assertEqual(agent._get_instance_node_labels('missing', info), info['node_labels'])
+            self.assertEqual(agent._get_instance_node_labels('job', {}), {})
+
+    def test_builder_receives_original_label_and_unique_name_for_both_roles(self):
+        class BuilderReached(Exception):
+            pass
+
+        key = 'labels.swarmchestrate.eu/ms_id'
+        for role in ('master', 'worker'):
+            for provider in ('aws', 'openstack', 'edge'):
+                with self.subTest(role=role, provider=provider):
+                    agent = agent_class()()
+                    agent.ra_id = 'ra'
+                    agent.logger = Mock()
+                    agent.deleted_jobs = set()
+                    agent.pending_deletions = {}
+                    agent.job_capreg_allocated = {}
+                    agent.capacity_file = 'capacity.yaml'
+                    agent.dry_run = False
+                    scope = agent._get_instance_node_labels.__globals__
+                    info = {'node_labels': {key: 'audio-class-2', 'zone': 'uk'}}
+                    scope['Sardou'] = Mock()
+                    scope['Sardou'].return_value.get_cluster.return_value = {'node': info}
+                    scope['_os'] = Mock()
+                    scope['_os'].getenv.return_value = 'true'
+                    builder = Mock()
+                    builder.return_value.add_node.side_effect = BuilderReached
+                    scope['Swarmchestrate'] = builder
+                    offer = {'offer': {'ids': {'ms_id': 'audio-class-2', 'offer_id': 'offer',
+                                              'res_type': 'edge' if provider == 'edge' else 'cloud',
+                                              'provider_id': provider}}}
+                    message = {'job_id': 'job', 'lead_resource': role == 'master',
+                               'leader_resource_name': 'audio-class-2',
+                               'offer_info': {'audio-class-2': offer},
+                               'instance': {'node-name': 'audio-class-2', 'k3s_role': role,
+                                            'resource': offer},
+                               'master_info': {'cluster_name': 'job', 'master_ip': 'ip', 'k3s_token': 'token'}}
+                    with tempfile.TemporaryDirectory() as directory:
+                        root = Path(directory)
+                        (root / 'KB').mkdir()
+                        (root / 'KB/tosca_job.instances.json').write_text(
+                            json.dumps({'audio-class-2': 'audio-class'}))
+                        scope['Path'] = lambda value: root / value
+                        handler = (agent._handle_create_lead_resource if role == 'master'
+                                   else agent._handle_create_resource_blocking)
+                        with patch('builtins.print'), self.assertRaises(BuilderReached):
+                            handler('hub', message)
+                    config = builder.return_value.add_node.call_args.args[0]
+                    self.assertEqual(config['resource_name'], 'audio-class-2')
+                    self.assertEqual(config['node_labels'], {key: 'audio-class', 'zone': 'uk'})
+
     def test_expansion_preserves_original_and_pairs_colocation(self):
         source = example()
         before = deepcopy(source)

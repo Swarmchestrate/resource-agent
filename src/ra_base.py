@@ -1446,6 +1446,21 @@ class ResourceAgent:
         self.capreg.dump_capacity_registry_info()
 
 
+    def _get_instance_node_labels(self, job_id, node_info):
+        """Restore the original microservice label without changing node identity."""
+        labels = dict(node_info.get("node_labels") or {})
+        label_key = "labels.swarmchestrate.eu/ms_id"
+        if label_key not in labels:
+            return labels
+        mapping_path = Path("KB") / f"tosca_{job_id}.instances.json"
+        try:
+            with mapping_path.open() as stream:
+                instance_origins = json.load(stream)
+        except FileNotFoundError:
+            return labels
+        labels[label_key] = instance_origins.get(labels[label_key], labels[label_key])
+        return labels
+
     def _handle_create_lead_resource(self, peer_id, message):
         """
             Ze:
@@ -1533,7 +1548,6 @@ class ResourceAgent:
             ssh_auth_method = node_info.get("ssh_auth_method", "")
             # Ze: This ip is for RA to talk with the edge device
             edge_device_ip = node_info.get("edge_device_ip", "")
-            ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
             # Ze: This ip is for edge devices to talk with each other
             edge_device_local_ip = node_info.get("edge_device_local_ip", "")
 
@@ -1598,7 +1612,7 @@ class ResourceAgent:
                 f'"edge_device_ip": "{edge_device_ip}",'
                 f'"ha": false,'
                 f'"cluster_name": "{job_id}",'
-                f'"resource_name":"{ms_id}",'
+                f'"resource_name":"{node_name}",'
                 f'"ssh_user": "{ssh_user}",'
                 f'"ssh_key": "{ssh_key_path}",'
                 f'"ssh_auth_method": "{ssh_auth_method}",'
@@ -1613,6 +1627,7 @@ class ResourceAgent:
             }[cloud]
             print(f"[DEBUG] master_node string is {master_node}")
             master_node = json.loads(master_node)
+            master_node["node_labels"] = self._get_instance_node_labels(job_id, node_info)
 
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             if self.dry_run:
@@ -1957,7 +1972,6 @@ class ResourceAgent:
         # edge
         ssh_auth_method = node_info.get("ssh_auth_method", "")
         edge_device_ip = node_info.get("edge_device_ip", "")
-        ms_id = node_info.get("node_labels", {}).get("labels.swarmchestrate.eu/ms_id", "")
 
         # aws
         aws_instance_type = node_info.get("instance_type", "")
@@ -2042,6 +2056,7 @@ class ResourceAgent:
             print(f"ssh_user is {ssh_user}")
             
             worker_node = json.loads(worker_node)
+            worker_node["node_labels"] = self._get_instance_node_labels(job_id, node_info)
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             if self.dry_run:
                 self.logger.info(f"Dry run enabled. Would create worker node with the following configuration: {json.dumps(worker_node, indent=2)}")
