@@ -1630,7 +1630,6 @@ class ResourceAgent:
                 "sztaki": master_node_openstack,  # Add sztaki here
                 "edge": master_node_edge
             }[cloud]
-            print(f"[DEBUG] master_node string is {master_node}")
             master_node = json.loads(master_node)
             master_node["node_labels"] = [
                 f"{key}={value}"
@@ -1644,6 +1643,10 @@ class ResourceAgent:
                 cluster_name = self._get_cluster_name(job_id)
                 master_ip = "dry-run-ip"
             else:
+                self.logger.info(
+                    "Cluster-builder add_node input for master (job %s):\n%s",
+                    job_id, json.dumps(master_node, indent=2),
+                )
                 outputs = swarmchestrate.add_node(master_node, dryrun=self.dry_run)
 
                 k3s_token = outputs.get("k3s_token")
@@ -2072,6 +2075,10 @@ class ResourceAgent:
             if self.dry_run:
                 self.logger.info(f"Dry run enabled. Would create worker node with the following configuration: {json.dumps(worker_node, indent=2)}")
             else:
+                self.logger.info(
+                    "Cluster-builder add_node input for worker (job %s):\n%s",
+                    job_id, json.dumps(worker_node, indent=2),
+                )
                 swarmchestrate.add_node(worker_node, dryrun=self.dry_run)
 
             offers_all = self.capreg.resource_offer_query_all(job_id)
