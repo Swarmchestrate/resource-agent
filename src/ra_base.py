@@ -363,7 +363,7 @@ class ResourceAgent:
                         self.logger.info("Job %s: destroying cluster on lead RA %s", job_id, self.ra_id)
                         result = Swarmchestrate(
                             template_dir="templates", output_dir="output"
-                        ).destroy(job_id, dryrun=self.dry_run)
+                        ).destroy(self._get_cluster_name(job_id), dryrun=self.dry_run)
                         if result is False:
                             raise RuntimeError("Cluster destruction failed")
                     # Offers can exist even if this RA never allocated resources.
@@ -1446,6 +1446,10 @@ class ResourceAgent:
         self.capreg.dump_capacity_registry_info()
 
 
+    def _get_cluster_name(self, job_id):
+        """Use cluster-builder identifiers without changing Kubernetes/job IDs."""
+        return job_id.replace("-", "_")
+
     def _get_instance_node_labels(self, job_id, node_info):
         """Restore the original microservice label without changing node identity."""
         labels = dict(node_info.get("node_labels") or {})
@@ -1472,6 +1476,7 @@ class ResourceAgent:
             return
         LR = message.get('lead_resource')
         lead_resource_name = message.get('leader_resource_name')
+        cluster_name = self._get_cluster_name(job_id)
         instance = message.get('instance', {})
         cloud = message.get('cloud', {})
         k3s_role = instance["k3s_role"]
@@ -1580,7 +1585,7 @@ class ResourceAgent:
                 f'{{"cloud": "{cloud}",'
                 f'"instance_type": "{aws_instance_type}",'
                 f'"ha": false,'
-                f'"cluster_name": "{job_id}",'
+                f'"cluster_name": "{cluster_name}",'
                 f'"ami": "{aws_ami}",'
                 f'"security_group_id": "",'
                 f'"resource_name":"{node_name}",'
@@ -1599,7 +1604,7 @@ class ResourceAgent:
                 f'"volume_size": "10",'
                 #f'"floating_ip_pool": "ext-net",'
                 f'"network_id": "{openstack_network_id}",'
-                f'"cluster_name": "{job_id}",'
+                f'"cluster_name": "{cluster_name}",'
                 f'"resource_name":"{node_name}",'
                 f'"ssh_user": "{ssh_user}",'
                 #f'"ssh_key_name": "",'
@@ -1611,7 +1616,7 @@ class ResourceAgent:
                 f'{{"cloud": "{cloud}",'
                 f'"edge_device_ip": "{edge_device_ip}",'
                 f'"ha": false,'
-                f'"cluster_name": "{job_id}",'
+                f'"cluster_name": "{cluster_name}",'
                 f'"resource_name":"{node_name}",'
                 f'"ssh_user": "{ssh_user}",'
                 f'"ssh_key": "{ssh_key_path}",'
@@ -1633,13 +1638,13 @@ class ResourceAgent:
             if self.dry_run:
                 self.logger.info(f"Dry run enabled. Would create lead resource with the following configuration: {json.dumps(master_node, indent=2)}")
                 k3s_token = "dry-run-token"
-                cluster_name = job_id
+                cluster_name = self._get_cluster_name(job_id)
                 master_ip = "dry-run-ip"
             else:
                 outputs = swarmchestrate.add_node(master_node, dryrun=self.dry_run)
 
                 k3s_token = outputs.get("k3s_token")
-                cluster_name = outputs.get("cluster_name")
+                cluster_name = outputs.get("cluster_name") or cluster_name
                 master_ip = outputs.get("master_ip")
             # Add logic to update resource status in the registry based on the result of node creation
             # cap-lib-DONE: assigned -> allocated
@@ -1675,13 +1680,13 @@ class ResourceAgent:
 
                         # Ze-TODO: output directory
             # a test
-            #output_dir = f"output/cluster_{job_id}/k3s-{job_id}"
+            #output_dir = f"output/cluster_{cluster_name}/k3s-{job_id}"
             #_os.makedirs(output_dir, exist_ok=True)  # ✅ Creates folder if it doesn't exist
-            folder_path = f"output/cluster_{job_id}/k3s-{job_id}"
+            folder_path = f"output/cluster_{cluster_name}/k3s-{job_id}"
             _os.makedirs(folder_path, exist_ok=True)  # ✅ Creates folder if it doesn't exist
             src_folder = "k3s"
 
-            # ✅ Copy all files from k3s/ into output/cluster_{job_id}/k3s-{job_id}/
+            # ✅ Copy all files from k3s/ into output/cluster_{cluster_name}/k3s-{job_id}/
             if _os.path.exists(src_folder):
                 for item in _os.listdir(src_folder):
                     src_path = _os.path.join(src_folder, item)
@@ -1694,7 +1699,7 @@ class ResourceAgent:
                 print(f"⚠️ Warning: Source folder '{src_folder}' does not exist.")
             
             # prepare configmap of tosca file for SA
-            configMap_tosca_path = f"output/cluster_{job_id}/k3s-{job_id}/03-configmap-swarm-agent-tosca.yaml"
+            configMap_tosca_path = f"output/cluster_{cluster_name}/k3s-{job_id}/03-configmap-swarm-agent-tosca.yaml"
             write_tosca_configmap(f"KB/{job_id}_tosca.yaml", output_file=configMap_tosca_path)
             
             # Ze-done: Prepare configmap of SA configuration
@@ -1704,7 +1709,7 @@ class ResourceAgent:
                 "LEADER": lead_resource_name,
                 "Worker": [res for res in offer_info if res != lead_resource_name]
             }
-            configMap_config_path = f"output/cluster_{job_id}/k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
+            configMap_config_path = f"output/cluster_{cluster_name}/k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
             # The ra_ip should be the ip of one of the RAs, don't be confused with master_ip which is the LR ip.
             write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.hub_ra_ip+"")
            
@@ -1759,7 +1764,7 @@ class ResourceAgent:
 
             # Ze-TODO: until here were commented
             # Use absolute path to ensure OpenTofu can find it from any directory
-            absolute_path = os.path.abspath(f"output/cluster_{job_id}/k3s-{job_id}")
+            absolute_path = os.path.abspath(f"output/cluster_{cluster_name}/k3s-{job_id}")
             print(f"[DEBUG] ssh_port before applying manifests is {ssh_port}\n")
             # copy the manifests from k3s-{job_id}/ to the LR
             manifest_cfg = (

@@ -12,7 +12,7 @@ def load_agent_class():
     tree = ast.parse(Path(__file__).with_name('ra_base.py').read_text())
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef)
                and node.name == 'ResourceAgent')
-    names = {'_clear_job_data', '_handle_delete_job_broadcast',
+    names = {'_get_cluster_name', '_clear_job_data', '_handle_delete_job_broadcast',
              '_handle_delete_job_ack', '_start_job_deletion',
              '_handle_job_delete', '_handle_job_delete_all',
              '_handle_resource_response', '_handle_create_resource_blocking'}
@@ -98,6 +98,14 @@ class DeletionTests(unittest.TestCase):
         self.builder.return_value.destroy.assert_called_once()
         self.agent.capreg.resources_and_offers_destroy_all.assert_called_once()
         self.assertEqual(len(self.replies('MSG_DELETE_JOB_ACK')), 2)
+
+    def test_delete_uses_cluster_name_but_releases_capacity_by_job_id(self):
+        job = 'ra-aws-20260916-163725'
+        self.add_job(job)
+        self.agent._handle_delete_job_broadcast('remote-hub', {'job_id': job, 'LR_id': 'hub'})
+        self.builder.return_value.destroy.assert_called_once_with(
+            'ra_aws_20260916_163725', dryrun=False)
+        self.agent.capreg.resources_and_offers_destroy_all.assert_called_once_with(job)
 
     def test_destroy_failure_preserves_capacity_and_state(self):
         self.builder.return_value.destroy.side_effect = RuntimeError('destroy failed')

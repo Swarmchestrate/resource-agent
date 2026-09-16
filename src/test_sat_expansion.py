@@ -32,7 +32,7 @@ def agent_class():
     tree = ast.parse(Path(__file__).with_name('ra_base.py').read_text())
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef)
                and node.name == 'ResourceAgent')
-    names = {'_process_job_requirements', '_get_independent_microservices',
+    names = {'_get_cluster_name', '_process_job_requirements', '_get_independent_microservices',
              '_find_valid_combinations', '_get_instance_node_labels',
              '_handle_create_lead_resource', '_handle_create_resource_blocking'}
     cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
@@ -98,16 +98,16 @@ class ExpansionTests(unittest.TestCase):
                     offer = {'offer': {'ids': {'ms_id': 'audio-class-2', 'offer_id': 'offer',
                                               'res_type': 'edge' if provider == 'edge' else 'cloud',
                                               'provider_id': provider}}}
-                    message = {'job_id': 'job', 'lead_resource': role == 'master',
+                    message = {'job_id': 'ra-aws-job', 'lead_resource': role == 'master',
                                'leader_resource_name': 'audio-class-2',
                                'offer_info': {'audio-class-2': offer},
                                'instance': {'node-name': 'audio-class-2', 'k3s_role': role,
                                             'resource': offer},
-                               'master_info': {'cluster_name': 'job', 'master_ip': 'ip', 'k3s_token': 'token'}}
+                               'master_info': {'cluster_name': 'ra_aws_job', 'master_ip': 'ip', 'k3s_token': 'token'}}
                     with tempfile.TemporaryDirectory() as directory:
                         root = Path(directory)
                         (root / 'KB').mkdir()
-                        (root / 'KB/tosca_job.instances.json').write_text(
+                        (root / 'KB/tosca_ra-aws-job.instances.json').write_text(
                             json.dumps({'audio-class-2': 'audio-class'}))
                         scope['Path'] = lambda value: root / value
                         handler = (agent._handle_create_lead_resource if role == 'master'
@@ -115,6 +115,7 @@ class ExpansionTests(unittest.TestCase):
                         with patch('builtins.print'), self.assertRaises(BuilderReached):
                             handler('hub', message)
                     config = builder.return_value.add_node.call_args.args[0]
+                    self.assertEqual(config['cluster_name'], 'ra_aws_job')
                     self.assertEqual(config['resource_name'], 'audio-class-2')
                     self.assertEqual(config['node_labels'], {key: 'audio-class', 'zone': 'uk'})
 
