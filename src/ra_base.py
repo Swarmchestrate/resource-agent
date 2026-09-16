@@ -1547,7 +1547,8 @@ class ResourceAgent:
             #    print(f"[DEBUG] ra_id {self.ra_id} is UST-RA, ssh_port is {ssh_port}\n")
               # general
             ssh_user = node_info.get("ssh_user", "ec2-user")
-            node_labels = node_info.get("node_labels", {})
+            labels = self._get_instance_node_labels(job_id, node_info)
+            node_labels = [f"{key}={value}" for key, value in labels.items()]
             
             # resource specific configurations for cluster builder's iuputs
             # edge
@@ -1590,10 +1591,10 @@ class ResourceAgent:
                 f'"ami": "{aws_ami}",'
                 f'"security_group_id": "",'
                 f'"resource_name":"{node_name}",'
+                f'"node_labels": {json.dumps(node_labels)},'
                 f'"ssh_user": "ec2-user",'
                 f'"ssh_key": "{ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
                 f'"k3s_role": "{k3s_role}",' # Ze: this should be default
-                f'"node_labels": "{node_labels}",'
                 f'"custom_ingress_ports": {ports}}}'
                 )
 
@@ -1608,6 +1609,7 @@ class ResourceAgent:
                 f'"network_id": "{openstack_network_id}",'
                 f'"cluster_name": "{cluster_name}",'
                 f'"resource_name":"{node_name}",'
+                f'"node_labels": {json.dumps(node_labels)},'
                 f'"ssh_user": "{ssh_user}",'
                 #f'"ssh_key_name": "",'
                 f'"ssh_key": "{ssh_key_path}",'
@@ -1620,6 +1622,7 @@ class ResourceAgent:
                 f'"ha": false,'
                 f'"cluster_name": "{cluster_name}",'
                 f'"resource_name":"{node_name}",'
+                f'"node_labels": {json.dumps(node_labels)},'
                 f'"ssh_user": "{ssh_user}",'
                 f'"ssh_key": "{ssh_key_path}",'
                 f'"ssh_auth_method": "{ssh_auth_method}",'
@@ -1633,10 +1636,6 @@ class ResourceAgent:
                 "edge": master_node_edge
             }[cloud]
             master_node = json.loads(master_node)
-            #master_node["node_labels"] = [
-            #    f"{key}={value}"
-            #    for key, value in self._get_instance_node_labels(job_id, node_info).items()
-            #]
 
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             if self.dry_run:
@@ -1964,6 +1963,8 @@ class ResourceAgent:
         print(f"[DEBUG] cluster_info is {cluster_info}\n")
         
         node_info = next(iter(cluster_info.values()), {})
+        labels = self._get_instance_node_labels(job_id, node_info)
+        node_labels = [f"{key}={value}" for key, value in labels.items()]
         
         ssh_key_path = node_info.get("ssh_key", "")
 
@@ -2018,6 +2019,7 @@ class ResourceAgent:
                     f'"ami": "{aws_ami}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ami?
                     f'"security_group_id": "",' # Ze: we can make it dynamic later from cluster-builder lib
                     f'"resource_name":"{node_name}",' # Ze: to think about how to name
+                    f'"node_labels": {json.dumps(node_labels)},'
                     f'"ssh_user": "ec2-user",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own ssh user?
                  #   f'"ssh_key_name": "",' # Ze: we can make it dynamic later (from capacity/config info) Does each provider has its own key pair?
                     f'"ssh_key": "{ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
@@ -2037,6 +2039,7 @@ class ResourceAgent:
                     #f'"floating_ip_pool": "ext-net",'
                     f'"network_id": "{openstack_network_id}",'
                     f'"resource_name":"{node_name}",'
+                    f'"node_labels": {json.dumps(node_labels)},'
                     f'"ssh_user": "{ssh_user}",'
                     #f'"ssh_key_name": "",'
                     f'"ssh_key": "{ssh_key_path}",'
@@ -2052,6 +2055,7 @@ class ResourceAgent:
                     f'"edge_device_ip": "{edge_device_ip}",'
                     f'"ha": false,'
                     f'"resource_name":"{node_name}",'
+                    f'"node_labels": {json.dumps(node_labels)},'
                     f'"ssh_user": "{ssh_user}",'
                     f'"ssh_key": "{ssh_key_path}",'
                     f'"ssh_auth_method": "{ssh_auth_method}",'
@@ -2069,10 +2073,6 @@ class ResourceAgent:
             print(f"ssh_user is {ssh_user}")
             
             worker_node = json.loads(worker_node)
-            worker_node["node_labels"] = [
-                f"{key}={value}"
-                for key, value in self._get_instance_node_labels(job_id, node_info).items()
-            ]
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             if self.dry_run:
                 self.logger.info(f"Dry run enabled. Would create worker node with the following configuration: {json.dumps(worker_node, indent=2)}")
