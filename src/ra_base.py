@@ -1547,6 +1547,7 @@ class ResourceAgent:
             #    print(f"[DEBUG] ra_id {self.ra_id} is UST-RA, ssh_port is {ssh_port}\n")
               # general
             ssh_user = node_info.get("ssh_user", "ec2-user")
+            node_labels = node_info.get("node_labels", {})
             
             # resource specific configurations for cluster builder's iuputs
             # edge
@@ -1592,6 +1593,7 @@ class ResourceAgent:
                 f'"ssh_user": "ec2-user",'
                 f'"ssh_key": "{ssh_key_path}",' # Ze: we can make it dynamic later (from capacity/config info) does each provider has its own private key?
                 f'"k3s_role": "{k3s_role}",' # Ze: this should be default
+                f'"node_labels": "{node_labels}",'
                 f'"custom_ingress_ports": {ports}}}'
                 )
 
@@ -1631,10 +1633,10 @@ class ResourceAgent:
                 "edge": master_node_edge
             }[cloud]
             master_node = json.loads(master_node)
-            master_node["node_labels"] = [
-                f"{key}={value}"
-                for key, value in self._get_instance_node_labels(job_id, node_info).items()
-            ]
+            #master_node["node_labels"] = [
+            #    f"{key}={value}"
+            #    for key, value in self._get_instance_node_labels(job_id, node_info).items()
+            #]
 
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             if self.dry_run:
