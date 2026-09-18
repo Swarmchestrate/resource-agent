@@ -746,7 +746,7 @@ class ResourceAgent:
             return
 
         self.capreg.dump_capacity_registry_info()
-        
+
         # # All RAs expand the same original SAT locally before matching. Keep the
         # # original file for manifests and save the identity mapping beside it.
         # with open(ask_yaml) as stream:
@@ -1236,7 +1236,8 @@ class ResourceAgent:
 
         # Use exactly the same count-one IDs as local offer generation. Reading
         # the original SAT here also avoids depending on response timing.
-        data, _ = expand_sat_counts(data)
+        
+        # data, _ = expand_sat_counts(data)
 
         # 1. Get all nodes that are of type swch:Microservice
         node_templates = data.get('service_template', {}).get('node_templates', {})
