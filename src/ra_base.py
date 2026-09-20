@@ -747,17 +747,13 @@ class ResourceAgent:
 
         self.capreg.dump_capacity_registry_info()
 
-        # # All RAs expand the same original SAT locally before matching. Keep the
-        # # original file for manifests and save the identity mapping beside it.
-        # with open(ask_yaml) as stream:
-        #     matching_sat, instance_origins = expand_sat_counts(yaml.safe_load(stream))
-        # original_path = Path(ask_yaml)
-        # matching_path = original_path.with_name(original_path.stem + '.expanded.yaml')
-        # write_yaml(matching_sat, str(matching_path))
-        # with open(original_path.with_name(original_path.stem + '.instances.json'), 'w') as stream:
-        #     json.dump(instance_origins, stream, indent=2)
-
-        #offers = self.capreg.resource_offer_generate_from_SAT_file(job_id, str(matching_path))
+        # The registry reserves every matching capacity for a requirement. Expanding
+        # the SAT before this call would let the first instance reserve them all.
+        with open(ask_yaml) as stream:
+            _, instance_origins = expand_sat_counts(yaml.safe_load(stream))
+        original_path = Path(ask_yaml)
+        with open(original_path.with_name(original_path.stem + '.instances.json'), 'w') as stream:
+            json.dump(instance_origins, stream, indent=2)
         offers = self.capreg.resource_offer_generate_from_SAT_file(job_id, ask_yaml)
         print(yaml.dump(offers))
     # Ze-comment: by far each RA returns its offer
@@ -820,7 +816,12 @@ class ResourceAgent:
         #test
         # ADDED: Check if job_offers[job_id] is None (no valid combinations)
         if not self.job_offers.get(job_id):
-            self.logger.exception(
+            # Every RA reserved candidate offers while evaluating this job.
+            for ra_id in self.peer.find_peers({"peer_type": "RA"}) + [self.ra_id]:
+                self.peer.send(ra_id, "MSG_SELECTED_OFFER", {
+                    "job_id": job_id, "offer_info": {}
+                })
+            self.logger.error(
                     "No valid resource combinations for application %s",
                     job_id,
                 )
@@ -871,7 +872,7 @@ class ResourceAgent:
 
         # 2. Pick a Lead Resource
 
-        if demonsrator_ra == "UST-RA":
+        if demonsrator_ra == "UST-RA" and "micro-processing" in valid:
             self.lead_resource[job_id] = "micro-processing"
         else:
             self.lead_resource[job_id] = random.choice(valid) if valid else None
@@ -993,7 +994,10 @@ class ResourceAgent:
                 "lead_resource": True,
                 "leader_resource_name": self.lead_resource[job_id],
                 "timestamp": message.get('timestamp'),
-                "instance": {"cloud": provider, "k3s_role": "master", "node-name": self.lead_resource[job_id]},
+                "instance": {"cloud": provider, "k3s_role": "master",
+                             "node-name": selected_ms,
+                             "original-ms-id": offer_data["ids"]["ms_id"],
+                             "offer-id": offer_id},
                 "tosca": self.job_tosca[job_id],
                 "offer_info": self.job_offers[job_id]
         }
@@ -1026,7 +1030,10 @@ class ResourceAgent:
         # Display response matrix
         
         resource_names = sorted(all_resource_names)
-        resource_names = self._get_independent_microservices(f"./KB/tosca_{job_id}.yaml") # override resource_names with the independent microservices extracted from TOSCA
+        sat_path = f"./KB/tosca_{job_id}.yaml"
+        resource_names = self._get_independent_microservices(sat_path)
+        with open(sat_path) as stream:
+            _, instance_origins = expand_sat_counts(yaml.safe_load(stream))
         print("Response Summary:")
         print("-" * 60)
         
@@ -1048,8 +1055,9 @@ class ResourceAgent:
 
             for resource_name in resource_names:
                 answer = "No"
-                if resource_name in responses:
-                    resource_data = responses[resource_name]
+                original_name = instance_origins.get(resource_name, resource_name)
+                if original_name in responses:
+                    resource_data = responses[original_name]
 
                     # ignore colocated-only entries
                     if not ("colocated" in resource_data and len(resource_data) == 1):
@@ -1071,7 +1079,8 @@ class ResourceAgent:
         with open("ra_responses.json", "w") as f:
             json.dump(ra_responses, f, indent=2)
 
-        valid_combinations = self._find_valid_combinations(ra_responses, resource_names)
+        valid_combinations = self._find_valid_combinations(
+            ra_responses, resource_names, instance_origins)
 
         with open("valid_combinations__.json", "w") as f:
             json.dump(valid_combinations, f, indent=2)
@@ -1234,10 +1243,10 @@ class ResourceAgent:
         with open(file_path, 'r') as f:
             data = yaml.load(f)
 
-        # Use exactly the same count-one IDs as local offer generation. Reading
-        # the original SAT here also avoids depending on response timing.
+        # Expand only for the hub's logical host slots. The capacity registry
+        # always evaluates the original SAT.
         
-        # data, _ = expand_sat_counts(data)
+        data, _ = expand_sat_counts(data)
 
         # 1. Get all nodes that are of type swch:Microservice
         node_templates = data.get('service_template', {}).get('node_templates', {})
@@ -1360,39 +1369,51 @@ class ResourceAgent:
         # Return first item if optimal_index is not empty
         return optimal_index[0]
 
-    def _find_valid_combinations(self, offers_dict, resources_list):
-
-        """Find all valid resource allocation combinations"""
-            # 1. For each required resource, collect all concrete offers across all RAs
-        import itertools
-        #print(f"[DEBUG] offers_dict: {offers_dict}")
-        offers_per_resource = {}
-        for resource in resources_list:
-            offers_per_resource[resource] = []
+    def _find_valid_combinations(self, offers_dict, resources_list, instance_origins=None):
+        """Assign one distinct reserved offer to each independent host instance."""
+        instance_origins = instance_origins or {}
+        candidates = {}
+        for instance in resources_list:
+            original = instance_origins.get(instance, instance)
+            candidates[instance] = []
             for ra_id, ra_offers in offers_dict.items():
-                if resource not in ra_offers:
-                    continue
-                resource_offers = ra_offers[resource]
-                # Skip colocated entries (they have a single "colocated" key, not real offers)
-                if "colocated" in resource_offers:
-                    continue
-                # Each remaining key is an offer_id mapping to offer details
-                for offer_id, offer_data in resource_offers.items():
-                    offers_per_resource[resource].append({offer_id: offer_data})
+                for offer_id, offer_data in ra_offers.get(original, {}).items():
+                    if offer_id == "colocated" or not isinstance(offer_data, dict):
+                        continue
+                    candidates[instance].append((ra_id, offer_id, offer_data))
+            if not candidates[instance]:
+                return {}
 
-        # 2. Cartesian product across per-resource offer lists
-        resource_keys = list(offers_per_resource.keys())
-        offer_lists = [offers_per_resource[r] for r in resource_keys]
-        combinations = list(itertools.product(*offer_lists))
-
-        # 3. Format as numbered combinations dict
         result = {}
-        for i, combo in enumerate(combinations, 1):
-            combination = {}
-            for resource, offer in zip(resource_keys, combo):
-                combination[resource] = offer
-            result[f"combination_{i}"] = combination
+        chosen = {}
+        used = set()
+        last_choice = {}
 
+        def visit(index):
+            if index == len(resources_list):
+                result[f"combination_{len(result) + 1}"] = dict(chosen)
+                return
+            instance = resources_list[index]
+            original = instance_origins.get(instance, instance)
+            for ra_id, offer_id, offer_data in candidates[instance]:
+                identity = (ra_id, offer_id)
+                # Instances of the same requirement are interchangeable. This
+                # order avoids producing every permutation of the same offers.
+                if identity in used or identity <= last_choice.get(original, ("", "")):
+                    continue
+                previous = last_choice.get(original)
+                last_choice[original] = identity
+                used.add(identity)
+                chosen[instance] = {offer_id: offer_data}
+                visit(index + 1)
+                del chosen[instance]
+                used.remove(identity)
+                if previous is None:
+                    del last_choice[original]
+                else:
+                    last_choice[original] = previous
+
+        visit(0)
         return result
 
 
@@ -1436,8 +1457,15 @@ class ResourceAgent:
         #                 else:
         #                     self.capreg.resource_offer_reject(offer_id, offer)
 
+        selected_by_ms = {}
+        for offers in the_selected_offer.values():
+            for offer_id, offer_data in offers.items():
+                if offer_data.get('ids', {}).get('ra_id') == self.ra_id:
+                    ms_id = offer_data['ids']['ms_id']
+                    selected_by_ms.setdefault(ms_id, set()).add(offer_id)
+
         for ms_id, offers in all_offers.items():
-            selected_ids = set(the_selected_offer.get(ms_id, {}).keys())
+            selected_ids = selected_by_ms.get(ms_id, set())
 
             for offer_id, offer in offers.items():
                 if offer_id in selected_ids:
@@ -1493,7 +1521,10 @@ class ResourceAgent:
         offer_info = message.get('offer_info', {})
         print(f"offer_info received by LR is {offer_info}")
             # Get the offer info of the resource(s) to deploy
-        lead_resource_offer = {lead_resource_name: offer_info[lead_resource_name]}
+        selected_offer = offer_info[lead_resource_name]
+        selected_offer_id, selected_offer_data = next(iter(selected_offer.items()))
+        original_ms_id = selected_offer_data['ids']['ms_id']
+        lead_resource_offer = {original_ms_id: selected_offer}
 
         if _os.getenv("AUTO_APPROVE", "false") == "true":
             print("AUTO_APPROVE is enabled, automatically proceeding with lead resource creation...")
@@ -1510,7 +1541,7 @@ class ResourceAgent:
             # Ze-done; make sure them can be correctly loaded on all clouds (sztaki, edge, aws_us)
 
             # Get the offer info of the resource(s) to deploy
-            lead_resource_offer = {lead_resource_name: offer_info[lead_resource_name]}
+            lead_resource_offer = {original_ms_id: selected_offer}
             print(f"offer_info received by LR is {lead_resource_offer} \n")
             ms_name = next(iter(lead_resource_offer))
             offer_id = next(iter(lead_resource_offer[ms_name]))
@@ -1552,6 +1583,8 @@ class ResourceAgent:
               # general
             ssh_user = node_info.get("ssh_user", "ec2-user")
             labels = self._get_instance_node_labels(job_id, node_info)
+            if original_ms_id != node_name:
+                labels['labels.swarmchestrate.eu/ms_id'] = original_ms_id
             node_labels = [f"{key}={value}" for key, value in labels.items()]
             
             # resource specific configurations for cluster builder's iuputs
@@ -1661,12 +1694,13 @@ class ResourceAgent:
             # cap-lib-DONE: assigned -> allocated
             
             offers_all = self.capreg.resource_offer_query_all(job_id)
-            for msid in offers_all.keys():
-                if msid == node_name:
-                    offerid=list(offers_all[msid].keys())[0]
-                    res_set = self.capreg.resource_set_get_from_offer(offerid, offers_all[msid][offerid])
-                    if res_set is not None:
-                        self.capreg.resource_set_deployed(job_id, msid, res_set["restype"], res_set["resid"], res_set["count"])
+            registry_offer = offers_all[original_ms_id][selected_offer_id]
+            res_set = self.capreg.resource_set_get_from_offer(
+                selected_offer_id, registry_offer)
+            if res_set is not None:
+                self.capreg.resource_set_deployed(
+                    job_id, original_ms_id, res_set["restype"],
+                    res_set["resid"], res_set["count"])
             self.capreg.dump_capacity_registry_info()
 
 
@@ -1866,6 +1900,8 @@ class ResourceAgent:
                     "resource": res_info,
                     "k3s_role": "worker",
                     "node-name": res,  # res is already the key / node name
+                    "original-ms-id": offer_data["ids"]["ms_id"],
+                    "offer-id": next(iter(res_info)),
                 },
                 "master_info": {
                     "k3s_token": k3s_token,
@@ -1936,7 +1972,7 @@ class ResourceAgent:
             return
         self.job_capreg_allocated[job_id] = True  # Mark that we've allocated resources for this job
         instance = message.get('instance', {})
-        offer_data = next(iter(instance["resource"].values()))
+        offer_id, offer_data = next(iter(instance["resource"].items()))
     
         print(f"[DEBUG]  Offer_data is: mainly to check whether there is resource count? \n {offer_data} \n")
         
@@ -1944,6 +1980,7 @@ class ResourceAgent:
         k3s_role = instance["k3s_role"]
        #resource_name = instance["node-name"]
         resource_name = offer_data["ids"]["ms_id"]
+        node_name = instance["node-name"]
         self.master_info = message.get('master_info')
         cluster_name = self.master_info["cluster_name"]
         master_ip = self.master_info["master_ip"]
@@ -1951,7 +1988,7 @@ class ResourceAgent:
         print(f"[DEBUG]  k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
         
         # Get the offer info of the resource(s) to deploy
-        resource_offer = {resource_name: {offer_data["ids"]["offer_id"]: offer_data}}
+        resource_offer = {resource_name: {offer_id: offer_data}}
 
         print(f"resource offer is received by worker node is {resource_offer}")
 
@@ -1968,6 +2005,8 @@ class ResourceAgent:
         
         node_info = next(iter(cluster_info.values()), {})
         labels = self._get_instance_node_labels(job_id, node_info)
+        if resource_name != node_name:
+            labels['labels.swarmchestrate.eu/ms_id'] = resource_name
         node_labels = [f"{key}={value}" for key, value in labels.items()]
         
         ssh_key_path = node_info.get("ssh_key", "")
@@ -2002,20 +2041,11 @@ class ResourceAgent:
 
         
         
+        # The hub sends one message for each selected offer, so this call
+        # creates exactly one node even when the SAT requests several hosts.
         for i in range(1):
-        # Ze-TODO: count is not working
-
-        #for i in range(instance["resource"]["count"]):
-        #    cloud = instance["resource"]["provider"]
-            #cloud = offer_data["ids"]["provider_id"]
-            #cloud = offer_data["ids"]["res_type"]
             print(f"[DEBUG] cloud is {cloud}")
-        #    if instance["resource"]["count"] >1:
-
-        #        node_name = f"{resource_name}-{i+1}"
-        #    else:
-
-            node_name = resource_name
+            # One selected offer creates one node; the hub supplies its unique name.
             worker_node_aws = (
                     f'{{"cloud": "aws",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
                     f'"instance_type": "{aws_instance_type}",'
@@ -2088,12 +2118,13 @@ class ResourceAgent:
                 swarmchestrate.add_node(worker_node, dryrun=self.dry_run)
 
             offers_all = self.capreg.resource_offer_query_all(job_id)
-            for msid in offers_all.keys():
-                if msid == node_name:
-                    offerid=list(offers_all[msid].keys())[0]
-                    res_set = self.capreg.resource_set_get_from_offer(offerid, offers_all[msid][offerid])
-                    if res_set is not None:
-                        self.capreg.resource_set_deployed(job_id, msid, res_set["restype"], res_set["resid"], res_set["count"])
+            registry_offer = offers_all[resource_name][offer_id]
+            res_set = self.capreg.resource_set_get_from_offer(
+                offer_id, registry_offer)
+            if res_set is not None:
+                self.capreg.resource_set_deployed(
+                    job_id, resource_name, res_set["restype"],
+                    res_set["resid"], res_set["count"])
             self.capreg.dump_capacity_registry_info()
         
 

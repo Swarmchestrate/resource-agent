@@ -34,7 +34,8 @@ def agent_class():
                and node.name == 'ResourceAgent')
     names = {'_get_cluster_name', '_process_job_requirements', '_get_independent_microservices',
              '_find_valid_combinations', '_get_instance_node_labels',
-             '_handle_create_lead_resource', '_handle_create_resource_blocking'}
+             '_handle_create_lead_resource', '_handle_create_resource_blocking',
+             '_handle_selected_offer'}
     cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
                 and node.name in names]
     # JSON is a YAML subset; use it to exercise file plumbing without PyYAML.
@@ -175,7 +176,7 @@ class ExpansionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exceeds 63'):
             expand_sat_counts(source)
 
-    def test_offer_generation_uses_expanded_copy_and_saves_mapping(self):
+    def test_offer_generation_uses_original_sat_and_saves_mapping(self):
         agent = agent_class()()
         agent.logger = Mock()
         agent.ra_id = 'ra'
@@ -188,10 +189,8 @@ class ExpansionTests(unittest.TestCase):
             path.write_text(json.dumps(example()))
             original = path.read_text()
             agent._process_job_requirements('job', 'client', str(path), 'hub')
-            matching = path.with_name('sat.expanded.yaml')
-            agent.capreg.resource_offer_generate_from_SAT_file.assert_called_once_with('job', str(matching))
+            agent.capreg.resource_offer_generate_from_SAT_file.assert_called_once_with('job', str(path))
             self.assertEqual(path.read_text(), original)
-            self.assertIn('details-3', json.loads(matching.read_text())['service_template']['node_templates'])
             self.assertEqual(json.loads(path.with_name('sat.instances.json').read_text())['details-3'], 'details')
 
     def test_combinations_require_every_expanded_independent_instance(self):
@@ -206,12 +205,90 @@ class ExpansionTests(unittest.TestCase):
             path.write_text(json.dumps(example()))
             resources = agent._get_independent_microservices(str(path))
         self.assertEqual(resources, ['details-1', 'details-2', 'details-3', 'ratings'])
-        offers = {'ra': {name: {f'offer-{name}': {'ids': {'ms_id': name}}}
-                         for name in resources}}
-        combinations = agent._find_valid_combinations(offers, resources)
+        origins = {name: name.split('-')[0] for name in resources}
+        offers = {'ra': {
+            'details': {f'offer-{i}': {'ids': {'ms_id': 'details', 'ra_id': 'ra'}}
+                        for i in range(1, 4)},
+            'ratings': {'offer-ratings': {'ids': {'ms_id': 'ratings', 'ra_id': 'ra'}}}}}
+        combinations = agent._find_valid_combinations(offers, resources, origins)
         self.assertEqual(set(combinations['combination_1']), set(resources))
-        del offers['ra']['details-3']
-        self.assertEqual(agent._find_valid_combinations(offers, resources), {})
+        self.assertEqual(len(combinations), 1)
+        del offers['ra']['details']['offer-3']
+        self.assertEqual(agent._find_valid_combinations(offers, resources, origins), {})
+
+    def test_count_can_span_ras_without_reusing_an_offer(self):
+        agent = agent_class()()
+        offers = {
+            'ra-a': {'details': {'a': {'ids': {'ms_id': 'details', 'ra_id': 'ra-a'}}}},
+            'ra-b': {'details': {
+                'b': {'ids': {'ms_id': 'details', 'ra_id': 'ra-b'}},
+                'c': {'ids': {'ms_id': 'details', 'ra_id': 'ra-b'}}}}}
+        slots = ['details-1', 'details-2', 'details-3']
+        origins = {slot: 'details' for slot in slots}
+        combinations = agent._find_valid_combinations(offers, slots, origins)
+        self.assertEqual(len(combinations), 1)
+        self.assertEqual({next(iter(item)) for item in combinations['combination_1'].values()},
+                         {'a', 'b', 'c'})
+
+    def test_selected_instance_ids_assign_only_their_original_registry_offers(self):
+        agent = agent_class()()
+        agent.ra_id = 'ra-a'
+        agent.logger = Mock()
+        agent.deleted_jobs = set()
+        agent.pending_deletions = {}
+        agent.capreg = Mock()
+        registry = {'details': {'a': {'ids': {'ms_id': 'details'}},
+                                'b': {'ids': {'ms_id': 'details'}},
+                                'c': {'ids': {'ms_id': 'details'}}}}
+        agent.capreg.resource_offer_query_all.return_value = registry
+        selected = {'details-1': {'a': {'ids': {'ms_id': 'details', 'ra_id': 'ra-a'}}},
+                    'details-2': {'c': {'ids': {'ms_id': 'details', 'ra_id': 'ra-a'}}}}
+        agent._handle_selected_offer('hub', {'job_id': 'job', 'offer_info': selected})
+        self.assertEqual([call.args[0] for call in agent.capreg.resource_offer_accept.call_args_list],
+                         ['a', 'c'])
+        agent.capreg.resource_offer_reject.assert_called_once_with('b', registry['details']['b'])
+
+    def test_worker_uses_unique_node_name_and_deploys_exact_offer(self):
+        agent = agent_class()()
+        agent.ra_id = 'ra'
+        agent.logger = Mock()
+        agent.deleted_jobs = set()
+        agent.pending_deletions = {}
+        agent.job_capreg_allocated = {}
+        agent.capacity_file = 'capacity.yaml'
+        agent.dry_run = False
+        agent.capreg = Mock()
+        registry = {'details': {'a': {'ids': {'ms_id': 'details'}},
+                                'b': {'ids': {'ms_id': 'details'}}}}
+        agent.capreg.resource_offer_query_all.return_value = registry
+        agent.capreg.resource_set_get_from_offer.side_effect = lambda offer_id, _: {
+            'restype': 'cloud', 'resid': offer_id, 'count': 1}
+        scope = agent._handle_create_resource_blocking.__globals__
+        scope['Sardou'] = Mock()
+        scope['Sardou'].return_value.get_cluster.return_value = {'node': {}}
+        builder = Mock()
+        scope['Swarmchestrate'] = builder
+        for number, offer_id in enumerate(('a', 'b'), 1):
+            offer = {'ids': {'ms_id': 'details', 'offer_id': offer_id,
+                             'ra_id': 'ra', 'res_type': 'cloud',
+                             'provider_id': 'aws'}}
+            message = {'job_id': 'job', 'instance': {
+                'node-name': f'details-{number}', 'k3s_role': 'worker',
+                'resource': {offer_id: offer}},
+                'master_info': {'cluster_name': 'job', 'master_ip': 'ip',
+                                'k3s_token': 'token'}}
+            with patch('builtins.print'):
+                agent._handle_create_resource_blocking('hub', message)
+        configs = [call.args[0] for call in builder.return_value.add_node.call_args_list]
+        self.assertEqual([config['resource_name'] for config in configs],
+                         ['details-1', 'details-2'])
+        self.assertEqual([config['node_labels'] for config in configs],
+                         [['labels.swarmchestrate.eu/ms_id=details']] * 2)
+        self.assertEqual([call.args[1] for call in
+                          agent.capreg.resource_set_get_from_offer.call_args_list],
+                         [registry['details']['a'], registry['details']['b']])
+        self.assertEqual([call.args[3] for call in
+                          agent.capreg.resource_set_deployed.call_args_list], ['a', 'b'])
 
 
 if __name__ == '__main__':
