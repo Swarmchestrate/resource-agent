@@ -360,7 +360,7 @@ class ResourceAgent:
             with self.resource_lock:
                 if job_id not in self.deleted_jobs:
                     if message.get('LR_id') == self.ra_id and not self.dry_run:
-                        self.logger.info("Job %s: destroying cluster on lead RA %s", job_id, self.ra_id)
+                        self.logger.info("APP %s: destroying cluster on lead RA %s", job_id, self.ra_id)
                         result = Swarmchestrate(
                             template_dir="templates", output_dir="output"
                         ).destroy(self._get_cluster_name(job_id), dryrun=self.dry_run)
@@ -368,8 +368,8 @@ class ResourceAgent:
                             raise RuntimeError("Cluster destruction failed")
                     # Offers can exist even if this RA never allocated resources.
                     if message.get('LR_id') == self.ra_id and self.dry_run:
-                        self.logger.info("Job %s: dry run; skipping cluster destruction", job_id)
-                    self.logger.info("Job %s: releasing local capacity and offers", job_id)
+                        self.logger.info("APP %s: dry run; skipping cluster destruction", job_id)
+                    self.logger.info("APP %s: releasing local capacity and offers", job_id)
                     result = self.capreg.resources_and_offers_destroy_all(job_id)
                     if result is False:
                         raise RuntimeError("Capacity release failed")
@@ -377,9 +377,9 @@ class ResourceAgent:
                     # Keep hub routing information until every RA has replied.
                     if job_id not in self.pending_deletions:
                         self._clear_job_data(job_id)
-                    self.logger.info("Job %s: local cleanup completed on RA %s", job_id, self.ra_id)
+                    self.logger.info("APP %s: local cleanup completed on RA %s", job_id, self.ra_id)
                 else:
-                    self.logger.info("Job %s: local cleanup already completed; acknowledging again", job_id)
+                    self.logger.info("APP %s: local cleanup already completed; acknowledging again", job_id)
         except Exception as exc:
             self.logger.exception("Failed to delete job %s", job_id)
             response.update(result="failure", message=str(exc))
@@ -397,20 +397,20 @@ class ResourceAgent:
             pending['remaining'].remove(peer_id)
             if message.get('result') != 'success':
                 pending['errors'].append(f"{peer_id}: {message.get('message', 'Cleanup failed')}")
-                self.logger.error("Job %s: deletion failed on %s: %s", job_id, peer_id, message.get('message', 'Cleanup failed'))
+                self.logger.error("APP %s: deletion failed on %s: %s", job_id, peer_id, message.get('message', 'Cleanup failed'))
             else:
-                self.logger.info("Job %s: cleanup acknowledged by %s", job_id, peer_id)
+                self.logger.info("APP %s: cleanup acknowledged by %s", job_id, peer_id)
             if pending['remaining']:
-                self.logger.info("Job %s: waiting for deletion acknowledgements from %s", job_id, sorted(pending['remaining']))
+                self.logger.info("APP %s: waiting for deletion acknowledgements from %s", job_id, sorted(pending['remaining']))
                 return
             del self.pending_deletions[job_id]
             pending['timer'].cancel()
             if pending['errors']:
                 self.job_states.setdefault(job_id, {})['state'] = 'DeleteFailed'
-                self.logger.error("Job %s: state=DeleteFailed; %s", job_id, '; '.join(pending['errors']))
+                self.logger.error("APP %s: state=DeleteFailed; %s", job_id, '; '.join(pending['errors']))
             else:
                 self._clear_job_data(job_id)
-                self.logger.info("Job %s: deletion completed successfully on all notified RAs", job_id)
+                self.logger.info("APP %s: deletion completed successfully on all notified RAs", job_id)
             pending['complete'](job_id, pending['errors'])
 
     def _handle_job_status_query(self, peer_id: str, message: Dict[str, Any]):
@@ -534,7 +534,7 @@ class ResourceAgent:
         # Ze-done: Using TOSCA library to validate and parse the tosca then extract resource requirements
         try:
             if self.bootstrap_peers:
-                raise ValueError("Job submissions must be sent to a hub RA")
+                raise ValueError("APP submissions must be sent to a hub RA")
             validate_microservice_names(ask_yaml)
             write_yaml(ask_yaml, 'tosca.yaml')
             # 1) (done) validate and parse
@@ -650,7 +650,7 @@ class ResourceAgent:
             with self.deletion_lock:
                 if self.pending_deletions.get(job_id) is not pending:
                     return
-                self.logger.error("Job %s: deletion timed out waiting for %s", job_id, sorted(pending['remaining']))
+                self.logger.error("APP %s: deletion timed out waiting for %s", job_id, sorted(pending['remaining']))
                 for target in list(pending['remaining']):
                     self._handle_delete_job_ack(target, {
                         'job_id': job_id, 'result': 'failure',
@@ -661,7 +661,7 @@ class ResourceAgent:
         pending['timer'] = timer
         timer.start()
         self.job_states.setdefault(job_id, {})['state'] = 'Deleting'
-        self.logger.info("Job %s: state=Deleting; lead RA=%s; notifying RAs %s", job_id, lead_ra, sorted(targets))
+        self.logger.info("APP %s: state=Deleting; lead RA=%s; notifying RAs %s", job_id, lead_ra, sorted(targets))
         payload = {
             'job_id': job_id, 'LR_id': lead_ra,
             'hub_ra': self.peer.peer_id, 'timestamp': message.get('timestamp'),
@@ -669,7 +669,7 @@ class ResourceAgent:
         for target in targets - {self.peer.peer_id}:
             try:
                 self.peer.send(target, "MSG_DELETE_JOB_BROADCAST", payload)
-                self.logger.info("Job %s: deletion broadcast sent to %s", job_id, target)
+                self.logger.info("APP %s: deletion broadcast sent to %s", job_id, target)
             except Exception as exc:
                 self._handle_delete_job_ack(target, {
                     'job_id': job_id, 'result': 'failure', 'message': str(exc),
@@ -680,7 +680,7 @@ class ResourceAgent:
         self.logger.info("Received job deletion request from %s for job %s", peer_id, message.get('job_id'))
         def complete(job_id, errors):
             log = self.logger.error if errors else self.logger.info
-            log("Job %s: deletion result for requester %s: %s", job_id, peer_id, '; '.join(errors) if errors else 'success')
+            log("APP %s: deletion result for requester %s: %s", job_id, peer_id, '; '.join(errors) if errors else 'success')
             self.peer.send(peer_id, "MSG_DELETE_RESPONSE", {
                 'job_id': job_id, 'ra_id': self.ra_id,
                 'result': 'failure' if errors else 'success',
