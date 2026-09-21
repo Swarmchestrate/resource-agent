@@ -762,6 +762,7 @@ class ResourceAgent:
         response_message = {
            "job_id": job_id,
            "ra_id": self.ra_id,
+           "cap_id": self.ra_cap_id,
            "provider": self.capacity.get('metadata', {}).get('resource-provider'),
            "timestamp": time.time(),
            "responses": offers
@@ -798,6 +799,7 @@ class ResourceAgent:
 
         self.job_responses[job_id][ra_id] = {
             'provider': provider,
+            'cap_id': message.get('cap_id'),
             'responses': responses
         }
 
@@ -1091,19 +1093,7 @@ class ResourceAgent:
 
         # print(f"[DEBUG] Testing valid combinations loaded from file: {filename}")
         
-        # Trust Score Ze: now we have all valid combinations, we need to retrieve the trust scores of each RA / or shall we update CDT with trust score so that they are embedded in the resource offer? For now, we will retrieve the trust score from CDT for each RA in the valid combinations
-
-
-        ra_ids = set()
-        for combination_data in valid_combinations.values():
-            for ms_id, offers in combination_data.items():
-                for offer_id, resource_data in offers.items():
-                    ra_id = resource_data.get('ids', {}).get('ra_id')
-                    if ra_id:
-                        ra_ids.add(ra_id)
-        print(f"[DEBUG] RA IDs extracted from valid combinations: {ra_ids}")
-        # We get the list of trust scores from OptimusDB
-        trust_scores = {ra_id: self.trust_store.get_trust_score(ra_id, default=1.0) for ra_id in ra_ids}
+        trust_scores = self._get_trust_scores_for_offers(job_id, valid_combinations)
         print(f"[DEBUG] Trust scores retrieved from OptimusDB: {trust_scores}")
 
 
@@ -1151,7 +1141,8 @@ class ResourceAgent:
             #selected_index = random.randint(0, len(valid_combinations) - 1)
             
             # Using AI algorithm to select the best combination
-            selected_index = self._rank_resource_offers(valid_combinations, job_id)
+            selected_index = self._rank_resource_offers(
+                valid_combinations, job_id, trust_scores)
             # Convert the NumPy index to a standard Python list of keys
             combination_keys = list(valid_combinations.keys())
 
@@ -1274,7 +1265,33 @@ class ResourceAgent:
 
         return sorted(independent_ms)
 
-    def _rank_resource_offers(self,valid_combinations, job_id):
+    def _get_trust_scores_for_offers(self, job_id, valid_combinations):
+        """Resolve offer RA IDs to CAP IDs and fetch each CAP's trust once."""
+        cap_ids_by_ra = {
+            ra_id: response.get('cap_id')
+            for ra_id, response in self.job_responses.get(job_id, {}).items()
+        }
+        ra_ids = {
+            data.get('ids', {}).get('ra_id')
+            for combination in valid_combinations.values()
+            for offers in combination.values()
+            for data in offers.values()
+        }
+        scores_by_cap_id = {}
+        scores_by_ra = {}
+        for ra_id in ra_ids - {None}:
+            cap_id = cap_ids_by_ra.get(ra_id)
+            if not cap_id:
+                self.logger.warning("No CAP ID for RA %s in job %s; using default trust", ra_id, job_id)
+                scores_by_ra[ra_id] = 1.0
+                continue
+            if cap_id not in scores_by_cap_id:
+                score = self.trust_store.get_trust_score(cap_id, default=1.0)
+                scores_by_cap_id[cap_id] = 1.0 if score is None else score
+            scores_by_ra[ra_id] = scores_by_cap_id[cap_id]
+        return scores_by_ra
+
+    def _rank_resource_offers(self,valid_combinations, job_id, trust_scores=None):
         """Rank resource offers based on QoS attributes using AI algorithm"""
         # Ze-done: Using the TOSCA library to fetch QoS priorities and populate them into the qos_priority template.
         # 1) create a qos_priority template
@@ -1300,18 +1317,8 @@ class ResourceAgent:
         bandwidth_list = []
         price_list = []
 
-        # Ze-TODO: we need trust score for each RA stores as a dict
-        # We get the list of RAs from the valid_combinations
-        ra_ids = set()
-        for combination_data in valid_combinations.values():
-            for ms_id, offers in combination_data.items():
-                for offer_id, resource_data in offers.items():
-                    ra_id = resource_data.get('ids', {}).get('ra_id')
-                    if ra_id:
-                        ra_ids.add(ra_id)
-        print(f"[DEBUG] RA IDs extracted from valid combinations: {ra_ids}")
-        # We get the list of trust scores from OptimusDB
-        trust_scores = {ra_id: self.trust_store.get_trust_score(ra_id, default=1.0) for ra_id in ra_ids}
+        if trust_scores is None:
+            trust_scores = self._get_trust_scores_for_offers(job_id, valid_combinations)
         print(f"[DEBUG] Trust scores retrieved from OptimusDB: {trust_scores}")
         # Ze: for each combination we calculate its qos
         for combination_data in valid_combinations.values():

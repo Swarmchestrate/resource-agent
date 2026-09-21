@@ -35,7 +35,7 @@ def agent_class():
     names = {'_get_cluster_name', '_process_job_requirements', '_get_independent_microservices',
              '_find_valid_combinations', '_get_instance_node_labels',
              '_handle_create_lead_resource', '_handle_create_resource_blocking',
-             '_handle_selected_offer'}
+             '_handle_selected_offer', '_get_trust_scores_for_offers'}
     cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
                 and node.name in names]
     # JSON is a YAML subset; use it to exercise file plumbing without PyYAML.
@@ -180,6 +180,7 @@ class ExpansionTests(unittest.TestCase):
         agent = agent_class()()
         agent.logger = Mock()
         agent.ra_id = 'ra'
+        agent.ra_cap_id = 'cap-ra'
         agent.capacity = {'metadata': {}}
         agent.capreg = Mock()
         agent.capreg.resource_offer_generate_from_SAT_file.return_value = {}
@@ -192,6 +193,7 @@ class ExpansionTests(unittest.TestCase):
             agent.capreg.resource_offer_generate_from_SAT_file.assert_called_once_with('job', str(path))
             self.assertEqual(path.read_text(), original)
             self.assertEqual(json.loads(path.with_name('sat.instances.json').read_text())['details-3'], 'details')
+            self.assertEqual(agent.peer.send.call_args.args[2]['cap_id'], 'cap-ra')
 
     def test_combinations_require_every_expanded_independent_instance(self):
         agent = agent_class()()
@@ -229,6 +231,24 @@ class ExpansionTests(unittest.TestCase):
         self.assertEqual(len(combinations), 1)
         self.assertEqual({next(iter(item)) for item in combinations['combination_1'].values()},
                          {'a', 'b', 'c'})
+
+    def test_trust_lookup_uses_cap_id_and_queries_shared_cap_once(self):
+        agent = agent_class()()
+        agent.logger = Mock()
+        agent.trust_store = Mock()
+        agent.trust_store.get_trust_score.return_value = 0.8
+        agent.job_responses = {'job': {
+            'ra-a': {'cap_id': 'cap-shared'},
+            'ra-b': {'cap_id': 'cap-shared'},
+            'ra-c': {'cap_id': None}}}
+        combinations = {'combination_1': {
+            'details-1': {'a': {'ids': {'ra_id': 'ra-a'}}},
+            'details-2': {'b': {'ids': {'ra_id': 'ra-b'}}},
+            'ratings': {'c': {'ids': {'ra_id': 'ra-c'}}}}}
+        scores = agent._get_trust_scores_for_offers('job', combinations)
+        self.assertEqual(scores, {'ra-a': 0.8, 'ra-b': 0.8, 'ra-c': 1.0})
+        agent.trust_store.get_trust_score.assert_called_once_with(
+            'cap-shared', default=1.0)
 
     def test_selected_instance_ids_assign_only_their_original_registry_offers(self):
         agent = agent_class()()
