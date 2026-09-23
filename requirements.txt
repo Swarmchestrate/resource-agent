@@ -44,5 +44,5 @@ Sardou==0.13.0
 #Sardou==0.4.2
 
 # cap_lib
-swchcapreg==0.2.1
+swchcapreg==0.2.2
 
