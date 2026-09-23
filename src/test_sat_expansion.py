@@ -5,6 +5,7 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -38,7 +39,8 @@ def agent_class():
              '_handle_create_lead_resource', '_handle_create_resource_blocking',
              '_handle_selected_offer', '_get_trust_scores_for_offers',
              '_offer_instances', '_first_offer_instance',
-             '_log_sat_requirements', '_log_resource_responses',
+             '_log_sat_requirements', '_parse_requirement_constraints',
+             '_log_resource_responses', '_log_ranked_combinations',
              '_maybe_dump_capacity', '_redact_sensitive',
              '_setting_enabled', '_new_application_id'}
     cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
@@ -51,19 +53,49 @@ def agent_class():
              'write_yaml': write_yaml, 'time': Mock(),
              'copy': types.SimpleNamespace(deepcopy=deepcopy),
              'product': __import__('itertools').product, '_os': os,
-             'datetime': __import__('datetime').datetime}
+             'datetime': __import__('datetime').datetime, 're': re}
     exec(compile(ast.Module(body=[cls], type_ignores=[]), 'ra_base.py', 'exec'), scope)
     return scope['ResourceAgent']
 
 
 class ExpansionTests(unittest.TestCase):
+    def test_top_ten_ranked_combination_matrix(self):
+        agent = agent_class()()
+        agent.logger = Mock()
+        combinations = {}
+        for number in range(1, 12):
+            combinations[f'combination_{number}'] = {
+                'audio-class': {
+                    f'offer-{number}': {
+                        'ids': {'ra_id': f'ra-{number}'},
+                        'characteristics': {
+                            'energy.consumption': number,
+                            'host.bandwidth': number * 10,
+                            'pricing.cost': number / 10,
+                        },
+                    }
+                }
+            }
+        ranking = list(reversed(range(11)))
+        trust = {f'ra-{number}': 0.9 for number in range(1, 12)}
+        agent._log_ranked_combinations('app-1', combinations, ranking, trust)
+        matrix = agent.logger.info.call_args.args[1]
+        self.assertIn('TOP 10 RANKED COMPILED OFFER COMBINATIONS', matrix)
+        self.assertIn('Rank | Combination', matrix)
+        self.assertIn('1    | combination_11', matrix)
+        self.assertIn('audio-class=ra-11', matrix)
+        self.assertNotIn('| combination_1 ', matrix)
+
     def test_requirement_and_ra_response_summaries(self):
         agent = agent_class()()
         agent.ra_id = 'ra-hub'
         agent.logger = Mock()
         agent._log_sat_requirements('app-1', {
             'audio-class': {
-                'expression': 'lambda vals: (vals["host.cpu"] >= 2)',
+                'expression': ("lambda vals: ((vals['host.num-cpus'] >= 2) and "
+                               "(vals['host.mem-size'] >= 4) and "
+                               "(vals['resource.type'] == 'cloud') and "
+                               "(vals['host.location'] == 'uk'))"),
                 'count': 3,
             }
         })
@@ -71,9 +103,14 @@ class ExpansionTests(unittest.TestCase):
         self.assertEqual(requirement_log[0], '\n%s')
         self.assertIn('SAT RESOURCE REQUIREMENTS', requirement_log[1])
         self.assertIn('Microservice', requirement_log[1])
-        self.assertIn('Requested Resources', requirement_log[1])
+        self.assertIn('CPU', requirement_log[1])
+        self.assertIn('Memory', requirement_log[1])
+        self.assertIn('Device Type', requirement_log[1])
+        self.assertIn('Location', requirement_log[1])
         self.assertIn('audio-class', requirement_log[1])
-        self.assertIn('(vals["host.cpu"] >= 2)', requirement_log[1])
+        self.assertIn('>= 2', requirement_log[1])
+        self.assertIn('cloud', requirement_log[1])
+        self.assertIn('uk', requirement_log[1])
 
         agent.logger.reset_mock()
         agent._log_resource_responses('app-1', 'ra-edge', {

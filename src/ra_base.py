@@ -18,6 +18,7 @@ from random import random
 import shutil as _shutil
 import json
 import logging
+import re
 import sys
 import threading
 import yaml
@@ -389,6 +390,8 @@ class ResourceAgent:
                      self.job_clients, self.job_offers, self.lead_resource,
                      self.job_capreg_allocated, self.job_tosca, self.tosca):
             data.pop(job_id, None)
+        if hasattr(self, '_offer_rankings'):
+            self._offer_rankings.pop(job_id, None)
 
     def _handle_delete_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Release local resources and acknowledge completion to the hub."""
@@ -1146,7 +1149,8 @@ class ResourceAgent:
             matrix_rows.append(" | ".join(row_cells).rstrip())
 
         matrix_title = f"RESOURCE OFFER RESPONSE SUMMARY — APP {job_id}"
-        separator = "=" * max(len(matrix_title), *(len(row) for row in matrix_rows))
+        separator = "=" * max(140, len(matrix_title),
+                                *(len(row) for row in matrix_rows))
         matrix = "\n".join([
             separator,
             matrix_title,
@@ -1224,6 +1228,9 @@ class ResourceAgent:
             # Using AI algorithm to select the best combination
             selected_index = self._rank_resource_offers(
                 valid_combinations, job_id, trust_scores)
+            ranked_indices = self._offer_rankings.get(job_id, [selected_index])
+            self._log_ranked_combinations(
+                job_id, valid_combinations, ranked_indices, trust_scores)
             # Convert the NumPy index to a standard Python list of keys
             combination_keys = list(valid_combinations.keys())
 
@@ -1325,6 +1332,7 @@ class ResourceAgent:
         if not requirements:
             return
         rows = []
+        constraint_columns = ["CPU", "Memory", "Device Type", "Location"]
         for ms_id, requirement in sorted((requirements or {}).items()):
             requirement = requirement if isinstance(requirement, dict) else {}
             expression = str(requirement.get('expression', 'unspecified')).strip()
@@ -1333,14 +1341,24 @@ class ResourceAgent:
             count = requirement.get('count', 1)
             colocated = requirement.get('colocated') or []
             colocated_text = ", ".join(map(str, colocated)) if colocated else "-"
-            rows.append((str(ms_id), expression, str(count), colocated_text))
+            constraints = self._parse_requirement_constraints(expression)
+            for column in constraints:
+                if column not in constraint_columns:
+                    constraint_columns.append(column)
+            rows.append({
+                "Microservice": str(ms_id),
+                **constraints,
+                "Count": str(count),
+                "Colocated With": colocated_text,
+            })
             self.logger.debug(
                 "[STAGE=OFFERS RA=%s APP=%s MS=%s] Full SAT requirement: %s",
                 self.ra_id, job_id, ms_id, requirement)
 
-        headings = ("Microservice", "Requested Resources", "Count", "Colocated With")
+        headings = ["Microservice", *constraint_columns, "Count", "Colocated With"]
+        row_values = [tuple(row.get(heading, "-") for heading in headings) for row in rows]
         widths = [
-            max(len(headings[index]), *(len(row[index]) for row in rows))
+            max(len(headings[index]), *(len(row[index]) for row in row_values))
             for index in range(len(headings))
         ]
 
@@ -1350,9 +1368,10 @@ class ResourceAgent:
             ).rstrip()
 
         header = format_row(headings)
-        matrix_rows = [format_row(row) for row in rows]
+        matrix_rows = [format_row(row) for row in row_values]
         title = f"SAT RESOURCE REQUIREMENTS — APP {job_id}"
-        separator = "=" * max(len(title), len(header), *(len(row) for row in matrix_rows))
+        separator = "=" * max(140, len(title), len(header),
+                                *(len(row) for row in matrix_rows))
         matrix = "\n".join([
             separator,
             title,
@@ -1363,6 +1382,43 @@ class ResourceAgent:
             separator,
         ])
         self.logger.info("\n%s", matrix)
+
+    @staticmethod
+    def _parse_requirement_constraints(expression):
+        """Convert Sardou comparison expressions into readable matrix cells."""
+        labels = {
+            'host.num-cpus': 'CPU',
+            'host.cpu': 'CPU',
+            'host.cpus': 'CPU',
+            'host.mem-size': 'Memory',
+            'host.memory': 'Memory',
+            'resource.type': 'Device Type',
+            'resource.location': 'Location',
+            'host.location': 'Location',
+            'resource.locality': 'Location',
+            'host.locality': 'Location',
+            'resource.region': 'Location',
+            'host.region': 'Location',
+        }
+        pattern = re.compile(
+            r"vals\[\s*(['\"])(?P<key>.+?)\1\s*\]\s*"
+            r"(?P<operator>==|!=|>=|<=|>|<)\s*"
+            r"(?P<value>'[^']*'|\"[^\"]*\"|[-+]?\d+(?:\.\d+)?|True|False|None)"
+        )
+        constraints = {}
+        for match in pattern.finditer(expression):
+            key = match.group('key')
+            label = labels.get(key, key.replace('.', ' ').replace('-', ' ').title())
+            operator = match.group('operator')
+            value = match.group('value')
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+            display = value if operator == '==' else f"{operator} {value}"
+            if label in constraints:
+                constraints[label] = f"{constraints[label]}, {display}"
+            else:
+                constraints[label] = display
+        return constraints
 
     def _log_resource_responses(self, job_id, source_ra, responses, requirements=None):
         """State which requested microservices one RA can fulfill."""
@@ -1525,8 +1581,77 @@ class ResourceAgent:
         evaluator = OfferEvaluator(offer_data)
         #optimal_index = evaluator.rank_offers_without_reliability()
         optimal_index = evaluator.rank_offers_with_reliability_addition()
+        if not hasattr(self, '_offer_rankings'):
+            self._offer_rankings = {}
+        self._offer_rankings[job_id] = [int(index) for index in optimal_index]
         # Return first item if optimal_index is not empty
         return optimal_index[0]
+
+    def _log_ranked_combinations(self, job_id, combinations, ranked_indices,
+                                 trust_scores, limit=10):
+        """Display the highest-ranked compiled offer combinations as a matrix."""
+        combination_items = list(combinations.items())
+        rows = []
+        for rank, index in enumerate(ranked_indices[:limit], 1):
+            index = int(index)
+            if index < 0 or index >= len(combination_items):
+                continue
+            combination_name, combination = combination_items[index]
+            allocations = []
+            energy = 0.0
+            bandwidth = 0
+            price = 0.0
+            reliability = 0.0
+            for ms_id, offers in sorted(combination.items()):
+                for data in offers.values():
+                    ids = data.get('ids', {})
+                    chars = data.get('characteristics', {})
+                    ra_id = ids.get('ra_id', 'unknown')
+                    allocations.append(f"{ms_id}={ra_id}")
+                    energy += float(chars.get('energy.consumption', 0) or 0)
+                    bandwidth += int(chars.get('host.bandwidth', 0) or 0)
+                    price += float(chars.get('pricing.cost', 0) or 0)
+                    reliability += float(trust_scores.get(ra_id, 1.0))
+            rows.append((
+                str(rank),
+                combination_name,
+                ", ".join(allocations),
+                f"{energy:.2f}",
+                str(bandwidth),
+                f"{price:.2f}",
+                f"{reliability:.2f}",
+            ))
+
+        if not rows:
+            return
+        headings = ("Rank", "Combination", "Microservice Allocation", "Energy",
+                    "Bandwidth", "Price", "Reliability")
+        widths = [
+            max(len(headings[index]), *(len(row[index]) for row in rows))
+            for index in range(len(headings))
+        ]
+
+        def format_row(values):
+            return " | ".join(
+                f"{value:<{widths[index]}}" for index, value in enumerate(values)
+            ).rstrip()
+
+        header = format_row(headings)
+        matrix_rows = [format_row(row) for row in rows]
+        title = (f"TOP {len(rows)} RANKED COMPILED OFFER COMBINATIONS — "
+                 f"APP {job_id}")
+        separator = "=" * max(140, len(title), len(header),
+                                *(len(row) for row in matrix_rows))
+        matrix = "\n".join([
+            separator,
+            title,
+            separator,
+            header,
+            "-" * len(header),
+            *matrix_rows,
+            separator,
+        ])
+        self.logger.info("\n%s", matrix)
 
     def _find_valid_combinations(self, offers_dict, resources_list, instance_origins=None):
         """Select one complete count-aware capacity offer per requirement."""
