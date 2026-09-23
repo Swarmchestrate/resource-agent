@@ -72,7 +72,6 @@ class ResourceAgent:
         self.capacity_file = capacity_file
         self.config = self._load_config(config_file)
         self.dry_run = self.config.get('dry_run', False)
-        print(f"[DEBUG] Dry run mode is {'enabled' if self.dry_run else 'disabled'} for RA {self.config.get('RA_id')}")
 
         self.deletion_lock = threading.RLock()
         self.pending_deletions = {}
@@ -102,8 +101,14 @@ class ResourceAgent:
         self.trust_store = TrustStore()
 
         # Setup logging
-        self._setup_logging()
         load_dotenv()
+        self.capacity_dump_enabled = self._setting_enabled(
+            "RA_CAPACITY_DUMP", self.config.get("capacity_dump", False))
+        self._setup_logging()
+        self.logger.info("[STAGE=INIT RA=%s] Initialisation started; CAP=%s",
+                         self.ra_id, self.ra_cap_id or "unset")
+        self.logger.debug("[STAGE=INIT RA=%s] Dry-run mode: %s",
+                          self.ra_id, self.dry_run)
 
 
 
@@ -132,11 +137,13 @@ class ResourceAgent:
 
 
         if self.ra_cap_id:
-            self.logger.info(f"RA-{self.ra_id}: RA CAP ID is {self.ra_cap_id}")
+            self.logger.info("[STAGE=INIT RA=%s CAP=%s] Resolving CDT", self.ra_id, self.ra_cap_id)
             download = KBClient.download_CDT_from_KB(self.ra_cap_id)
             if download["success"]:
-                self.logger.info(f"RA-{self.ra_id}: CDT {self.ra_cap_id} {download['filename']} downloaded successfuly from KB")
-                self.logger.info(f"RA-{self.ra_id}: {download['data']}")
+                self.logger.info("[STAGE=INIT RA=%s CAP=%s] CDT downloaded from KB: %s",
+                                 self.ra_id, self.ra_cap_id, download['filename'])
+                self.logger.debug("[STAGE=INIT RA=%s CAP=%s] CDT content: %s",
+                                  self.ra_id, self.ra_cap_id, download['data'])
                 # Ze: downloaded data is dict
                 parsed_capacity = download['data']
                 # Ze-DONE: capacity_content
@@ -153,7 +160,8 @@ class ResourceAgent:
                     self.logger.error(f"RA-{self.ra_id}: CDT {self.ra_cap_id} CAP ID mismatch: {cap_id_in_cdt}")
                     raise Exception(f"RA-{self.ra_id}: CDT {self.ra_cap_id} CAP ID mismatch: {cap_id_in_cdt}")
                 else:
-                    self.logger.info(f"RA-{self.ra_id}: CDT {self.ra_cap_id} CAP ID verified successfully")
+                    self.logger.info("[STAGE=INIT RA=%s CAP=%s] CDT CAP ID verified",
+                                     self.ra_id, self.ra_cap_id)
             # Ze-DONE: no online resource then we go for offline submitted by the user
             else:
                 self.logger.error(f"RA-{self.ra_id}: Download from KB failed: {download['error']}, the CDT file may not exist in KB, try finding from local input and uploading it to KB")
@@ -162,7 +170,7 @@ class ResourceAgent:
                         try:
                             capacity_content = stream.read()
                         except yaml.YAMLError as exc:
-                            print(exc)
+                            self.logger.exception("[STAGE=INIT RA=%s] Failed reading local CDT", self.ra_id)
                     parsed_capacity = yaml.safe_load(capacity_content)
                     upload = KBClient.upload_CDT_to_KB(self.ra_cap_id, parsed_capacity)
                     if upload["success"]:
@@ -179,7 +187,7 @@ class ResourceAgent:
                     try:
                         capacity_content = stream.read()
                     except yaml.YAMLError as exc:
-                        print(exc)
+                        self.logger.exception("[STAGE=INIT RA=%s] Failed reading local CDT", self.ra_id)
                 parsed_capacity = yaml.safe_load(capacity_content)
                 # Ze: in the case of no cap_id, we upload with ra_id
                 upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
@@ -196,8 +204,8 @@ class ResourceAgent:
         # CAP-LIB
         ######
         
-        print(f"[DEBUG] Initializing capacity registry for RA {self.config.get('RA_id')}")
-        self.capreg = SwChCapacityRegistry(self.config.get('RA_id'))
+        self.logger.debug("[STAGE=INIT RA=%s] Initialising capacity registry", self.ra_id)
+        self.capreg = SwChCapacityRegistry(self.config.get('RA_id'), logger=self.logger)
         #with open(self.capacity_file) as stream:
         #    try:
         #        capacity_content = stream.read()
@@ -206,7 +214,9 @@ class ResourceAgent:
         self.capreg.initialize_capacity_by_content(capacity_content)
         
         self.capacity = self._load_config(capacity_file) if capacity_file else {}
-        print(f"[DEBUG] Loaded capacity for RA {self.config.get('RA_id')}: {self.capacity}")
+        self.logger.debug("[STAGE=INIT RA=%s] Loaded capacity: %s", self.ra_id, self.capacity)
+        self._maybe_dump_capacity("initialised")
+        self.logger.info("[STAGE=INIT RA=%s] Initialisation completed", self.ra_id)
         #print(f"[DEBUG] Capacity registry info for RA {self.config.get('RA_id')}:")
         #for key, value in self.capreg.get_capacity_info().items():
         #    print(f"[DEBUG]   {key}: {value}")
@@ -230,7 +240,7 @@ class ResourceAgent:
 
     def _get_resource_capacity(self, res_id):
         if not self.capacity_file:
-            print("[WARN] No capacity_file specified")
+            self.logger.warning("No capacity_file specified")
             return None
 
         with open(self.capacity_file, "r") as f:
@@ -240,7 +250,7 @@ class ResourceAgent:
         resource_type = node_types.get(res_id)
 
         if not resource_type:
-            print(f"[WARN] Resource type {res_id} not found in {self.capacity_file}")
+            self.logger.warning(f"Resource type {res_id} not found in {self.capacity_file}")
             return None
 
         host_props = (
@@ -268,11 +278,42 @@ class ResourceAgent:
 
     def _setup_logging(self):
         """Setup logging configuration"""
+        configured_level = str(_os.getenv(
+            "RA_LOG_LEVEL", self.config.get("log_level", "INFO"))).upper()
+        level = getattr(logging, configured_level, logging.INFO)
         logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            level=level,
+            format='%(asctime)s %(levelname)-7s %(message)s',
+            force=True,
         )
         self.logger = logging.getLogger(f"RA-{self.ra_id}")
+        self.logger.setLevel(level)
+
+    @staticmethod
+    def _setting_enabled(env_name, configured=False):
+        value = _os.getenv(env_name)
+        if value is None:
+            return configured if isinstance(configured, bool) else str(configured).lower() == "true"
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _maybe_dump_capacity(self, reason, app_id=None):
+        """Dump the full registry only when explicitly enabled."""
+        if not getattr(self, "capacity_dump_enabled", False):
+            return
+        context = f" RA={self.ra_id}" + (f" APP={app_id}" if app_id else "")
+        self.logger.info("[STAGE=CAPACITY%s] Capacity snapshot: %s", context, reason)
+        self.capreg.dump_capacity_registry_info()
+
+    @classmethod
+    def _redact_sensitive(cls, value):
+        """Return a log-safe copy of nested configuration data."""
+        sensitive = {"k3s_token", "token", "password", "private_key", "secret"}
+        if isinstance(value, dict):
+            return {key: "<redacted>" if key.lower() in sensitive
+                    else cls._redact_sensitive(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._redact_sensitive(item) for item in value]
+        return value
 
     def initialize_peer(self):
         """Initialize P2P peer with configuration"""
@@ -307,9 +348,9 @@ class ResourceAgent:
             # Register message handlers
             self._register_message_handlers()
 
-            self.logger.info(f"RA {self.ra_id} initialized successfully")
-            self.logger.info(f"Listening on {self.domain}:{self.p2p_port}")
-            self.logger.info(f"API port: {self.api_port}")
+            self.logger.info("[STAGE=INIT RA=%s] P2P peer initialised", self.ra_id)
+            self.logger.debug("[STAGE=INIT RA=%s] P2P listen=%s:%s API port=%s",
+                              self.ra_id, self.domain, self.p2p_port, self.api_port)
 
         except Exception as e:
             self.logger.error(f"Failed to initialize peer: {e}")
@@ -352,7 +393,8 @@ class ResourceAgent:
     def _handle_delete_job_broadcast(self, peer_id: str, message: Dict[str, Any]):
         """Release local resources and acknowledge completion to the hub."""
         job_id = message.get('job_id')
-        self.logger.info("Received deletion broadcast for job %s from %s; starting local cleanup", job_id, peer_id)
+        self.logger.info("[STAGE=DELETION RA=%s APP=%s] Deletion broadcast received from %s",
+                         self.ra_id, job_id, peer_id)
         response = {"job_id": job_id, "result": "success"}
         try:
             if not job_id:
@@ -381,7 +423,8 @@ class ResourceAgent:
                 else:
                     self.logger.info("APP %s: local cleanup already completed; acknowledging again", job_id)
         except Exception as exc:
-            self.logger.exception("Failed to delete job %s", job_id)
+            self.logger.exception("[STAGE=DELETION RA=%s APP=%s] Application deletion failed",
+                                  self.ra_id, job_id)
             response.update(result="failure", message=str(exc))
         if peer_id == self.peer.peer_id:
             self._handle_delete_job_ack(peer_id, response)
@@ -415,7 +458,7 @@ class ResourceAgent:
 
     def _handle_job_status_query(self, peer_id: str, message: Dict[str, Any]):
         """Handle job status query requests"""
-        self.logger.info(f"Received job status query from {peer_id}")
+        self.logger.info("Application status query received from %s", peer_id)
         job_id = message.get('job_id', 'unknown')
         response = {
             "job_id": job_id,
@@ -425,13 +468,13 @@ class ResourceAgent:
             "queue_length": 0
         }
         self.peer.send(peer_id, "MSG_STATE_INFO", response)
-        self.logger.info(f"Sent job status for {job_id} to {peer_id}")
+        self.logger.info("[APP=%s] Application status sent to %s", job_id, peer_id)
 
     # Ze-TODO: verify the implementation
     def _handle_job_status_query_all(self, peer_id: str, message: Dict[str, Any]):
         """Handle all job status query requests."""
 
-        self.logger.info(f"Received job status query all from {peer_id}")
+        self.logger.info("All-application status query received from %s", peer_id)
 
         # 1) List all job IDs from self.job_states
         job_ids = list(self.job_states.keys())
@@ -446,7 +489,7 @@ class ResourceAgent:
                 "last_job": True,
             }
             self.peer.send(peer_id, "MSG_STATE_INFO", response)
-            self.logger.info(f"No jobs found. Sent empty status response to {peer_id}")
+            self.logger.info("No applications found; empty status response sent to %s", peer_id)
             return
 
         # # 2) Send status of each job back
@@ -479,11 +522,11 @@ class ResourceAgent:
 
             self.peer.send(peer_id, "MSG_STATE_INFO", response)
             self.logger.info(
-                f"Sent job status for {job_id} to {peer_id} "
+                f"Sent application status for {job_id} to {peer_id} "
                 f"(last_job={response['last_job']})"
             )
 
-        self.logger.info(f"Sent status for {len(job_ids)} jobs to {peer_id}")
+        self.logger.info("Application statuses sent to %s: count=%s", peer_id, len(job_ids))
         
 
     def _handle_resource_query(self, peer_id: str, message: Dict[str, Any]):
@@ -507,20 +550,23 @@ class ResourceAgent:
         }
         self.peer.send(peer_id, "MSG_HEARTBEAT_ACK", response)
 
-    def _handle_job_submit(self, peer_id: str, message: Dict[str, Any]):
-        """Handle job submission from client - Hub RA only"""
-        self.logger.info(f"Received application submission from {peer_id}")
+    @staticmethod
+    def _new_application_id(now=None):
+        """Create an RA-independent, provider-safe application identifier."""
+        now = now or datetime.now()
+        return "app-" + now.strftime("%Y%m%d-%H%M%S-%f")[:-3]
 
-        # DONE: as soon as job is received, job id should be created
+    def _handle_job_submit(self, peer_id: str, message: Dict[str, Any]):
+        """Handle application submission from client - Hub RA only"""
+        self.logger.info("[STAGE=OFFERS RA=%s] Application submission received from %s",
+                         self.ra_id, peer_id)
+
         client_id = message.get('client_id')
-        job_id = (self.ra_id + "_" + datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3])
-        import re
-        def sanitize_node_name(name: str) -> str:
-            name = name.lower()
-            name = re.sub(r"[^a-z0-9-]+", "-", name)
-            name = re.sub(r"-+", "-", name).strip("-")
-            return name[:63]
-        job_id = sanitize_node_name(job_id)
+        # Keep the protocol field name job_id for compatibility, while application
+        # and cluster identities no longer depend on the receiving RA.
+        job_id = self._new_application_id()
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Application ID created",
+                         self.ra_id, job_id)
 
         self.job_states[job_id] = {}
         self._update_job_state(job_id, "Pending")
@@ -539,7 +585,8 @@ class ResourceAgent:
             write_yaml(ask_yaml, 'tosca.yaml')
             # 1) (done) validate and parse
             self.tosca[job_id] = Sardou('tosca.yaml') #(to validate, may fail if invalid)
-            print(f"✅ Successfully validated submitted application tosca for job {job_id}")
+            self.logger.info("[STAGE=OFFERS RA=%s APP=%s] SAT validated",
+                             self.ra_id, job_id)
             
             
             save_path = f"./KB/tosca_{job_id}.yaml"
@@ -547,11 +594,13 @@ class ResourceAgent:
             with open(save_path, 'w') as f:
                 yaml.dump(self.job_tosca[job_id], f)
 
-            print(f"✅ !!!!! Successfully saved TOSCA file for job {job_id} at {save_path}")
+            self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] SAT saved at %s",
+                              self.ra_id, job_id, save_path)
             upload = KBClient.upload_SAT_to_KB(job_id, self.job_tosca[job_id])
             if upload["success"]:
                 # Should be a info log
-                print(f"{upload['filename']} uploaded successfuly to KB")
+                self.logger.info("[STAGE=OFFERS RA=%s APP=%s] SAT uploaded to KB: %s",
+                                 self.ra_id, job_id, upload['filename'])
             else:
                 # Should be an error log
                 raise RuntimeError(f"Upload to KB failed: {upload['error']}")
@@ -559,8 +608,8 @@ class ResourceAgent:
             download = KBClient.download_SAT_from_KB(job_id)
             if download["success"]:
                 # Should be an info log
-                print(f"{download['filename']} downloaded successfuly from KB")
-                print(download["data"])
+                self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] SAT downloaded from KB: %s; content=%s",
+                                  self.ra_id, job_id, download['filename'], download['data'])
             else:
                 # Should be an error log
                 raise RuntimeError(f"Download from KB failed: {download['error']}")
@@ -576,7 +625,8 @@ class ResourceAgent:
 
             # Hub RA processes resource requirements and broadcasts to other RAs
             if not self.bootstrap_peers:
-                self.logger.info(f"Broadcasting application {job_id} to all RAs")
+                self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Broadcasting requirements to RAs",
+                                 self.ra_id, job_id)
 
                 # Find all other RAs in network
                 all_ras = self.peer.find_peers({"peer_type": "RA"})
@@ -597,14 +647,17 @@ class ResourceAgent:
                 # Broadcast to all other RAs
                 for ra_id in other_ras:
                     self.peer.send(ra_id, "MSG_JOB_BROADCAST", broadcast_message)
-                    self.logger.info(f"Broadcasted application to {ra_id}")
+                    self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Requirements sent to RA=%s",
+                                      self.ra_id, job_id, ra_id)
 
                 # Process locally as well
                 self._process_job_requirements(job_id, client_id, save_path, self.peer.peer_id)
             else:
-                self.logger.warning("Non-hub RA received direct job submission")
+                self.logger.warning("[STAGE=OFFERS RA=%s APP=%s] Non-hub RA received direct application submission",
+                                    self.ra_id, job_id)
         except Exception as e:
-            print(f"❌ Failed to process tosca.yaml: {e}")
+            self.logger.exception("[STAGE=OFFERS RA=%s APP=%s] Failed to process SAT",
+                                  self.ra_id, job_id)
             self._update_job_state(job_id, new_state="Invalid")
             self.peer.send(peer_id, "MSG_SUBMIT_RESPONSE", {
                 "ra_id": self.ra_id,
@@ -617,12 +670,12 @@ class ResourceAgent:
     def _start_job_deletion(self, job_id, message, complete):
         """Track acknowledgements before reporting deletion to the requester."""
         if job_id in self.pending_deletions:
-            complete(job_id, ["Job deletion is already in progress"])
+            complete(job_id, ["Application deletion is already in progress"])
             return
         if not job_id or not any(job_id in data for data in (
                 self.job_states, self.job_offers, self.job_tosca,
                 self.job_capreg_allocated, self.lead_resource)):
-            complete(job_id, ["Job not found"])
+            complete(job_id, ["Application not found"])
             return
         selected_ms = self.lead_resource.get(job_id)
         offers = self.job_offers.get(job_id, {}).get(selected_ms, {})
@@ -678,29 +731,31 @@ class ResourceAgent:
         self._handle_delete_job_broadcast(self.peer.peer_id, payload)
 
     def _handle_job_delete(self, peer_id: str, message: Dict[str, Any]):
-        self.logger.info("Received job deletion request from %s for job %s", peer_id, message.get('job_id'))
+        self.logger.info("[STAGE=DELETION RA=%s APP=%s] Application deletion requested by %s",
+                         self.ra_id, message.get('job_id'), peer_id)
         def complete(job_id, errors):
             log = self.logger.error if errors else self.logger.info
             log("APP %s: deletion result for requester %s: %s", job_id, peer_id, '; '.join(errors) if errors else 'success')
             self.peer.send(peer_id, "MSG_DELETE_RESPONSE", {
                 'job_id': job_id, 'ra_id': self.ra_id,
                 'result': 'failure' if errors else 'success',
-                'message': '; '.join(errors) if errors else 'Job deleted successfully',
+                'message': '; '.join(errors) if errors else 'Application deleted successfully',
             })
         self._start_job_deletion(message.get('job_id'), message, complete)
 
     def _handle_job_delete_all(self, peer_id: str, message: Dict[str, Any]):
         job_ids = set(self.job_states) | set(self.job_offers) | set(self.lead_resource)
-        self.logger.info("Received delete-all request from %s; processing %s jobs", peer_id, len(job_ids))
+        self.logger.info("[STAGE=DELETION RA=%s] Delete-all request from %s; applications=%s",
+                         self.ra_id, peer_id, len(job_ids))
         remaining = set(job_ids)
         def complete(job_id, errors):
             remaining.discard(job_id)
             log = self.logger.error if errors else self.logger.info
-            log("Delete-all for %s: job=%s; result=%s; remaining=%s", peer_id, job_id, '; '.join(errors) if errors else 'success', len(remaining))
+            log("Delete-all for %s: APP=%s; result=%s; remaining=%s", peer_id, job_id, '; '.join(errors) if errors else 'success', len(remaining))
             self.peer.send(peer_id, "MSG_DELETE_ALL_RESPONSE", {
                 'job_id': job_id, 'ra_id': self.ra_id,
                 'result': 'failure' if errors else 'success',
-                'message': '; '.join(errors) if errors else 'Job deletion completed',
+                'message': '; '.join(errors) if errors else 'Application deletion completed',
                 'last_job': not remaining,
             })
         if not job_ids:
@@ -722,7 +777,8 @@ class ResourceAgent:
             # Should be an info log
             self.logger.info(f"RA{self.ra_id}: {ask_yaml['filename']} downloaded successfuly from KB")
             #print(f"RA{self.ra_id}: {ask_yaml['filename']} downloaded successfuly from KB")
-            print(ask_yaml["data"])
+            self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Downloaded SAT: %s",
+                              self.ra_id, job_id, ask_yaml["data"])
         else:
             # Should be an error log
             self.logger.error(f"RA{self.ra_id}: Download from KB failed: {ask_yaml['error']}")
@@ -733,26 +789,32 @@ class ResourceAgent:
         save_path = f"./KB/tosca_{job_id}.yaml"
         with open(save_path, 'w') as f:
             yaml.safe_dump(ask_yaml["data"], f)
-        print(f"✅ Successfully saved TOSCA file for job {job_id} at {save_path}")
+        self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] SAT saved at %s",
+                          self.ra_id, job_id, save_path)
         
         # Process job requirements
         self._process_job_requirements(job_id, client_id, save_path, hub_ra)
 
     # cap-lib-DONE: replace this _process_job_requirements func to support cap-lib
     def _process_job_requirements(self, job_id: str, client_id: str, ask_yaml: str, hub_ra: str):
-        self.logger.info(f"RA: {self.ra_id} Evaluating application {job_id} requirements")
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Evaluating SAT resource requirements",
+                         self.ra_id, job_id)
 
         if not self.capacity:
             self.logger.warning("No capacity data available for evaluation")
             return
 
-        self.capreg.dump_capacity_registry_info()
+        self._maybe_dump_capacity("before offer generation", job_id)
 
         # Sardou and the capacity registry both understand host.count. Keep the
         # original SAT intact so the registry can reserve a complete count-aware
         # offer atomically.
         offers = self.capreg.resource_offer_generate_from_SAT_file(job_id, ask_yaml)
-        print(yaml.dump(offers))
+        self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Generated offers:\n%s",
+                          self.ra_id, job_id, yaml.dump(offers))
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Offer generation completed: requirements=%s",
+                         self.ra_id, job_id, len(offers))
+        self._maybe_dump_capacity("offers reserved", job_id)
     # Ze-comment: by far each RA returns its offer
     # offers should be sent to the main RA now!
        # Send consolidated response to client
@@ -785,7 +847,8 @@ class ResourceAgent:
         if job_id in self.deleted_jobs or job_id in self.pending_deletions:
             return
         ra_id = message.get('ra_id')
-        self.logger.info(f"Received resource response for job {job_id} from RA: {ra_id}")
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Resource response received from RA=%s",
+                         self.ra_id, job_id, ra_id)
         provider = message.get('provider')
         responses = message.get('responses', {})
         len_res = len(responses)
@@ -802,10 +865,13 @@ class ResourceAgent:
 
         # Check if all RAs have responded
         all_ras = self.peer.find_peers({"peer_type": "RA"})
-        print(f"[DEBUG] The number of job_responses is {len(self.job_responses.get(job_id, {}))}. The number of RAs is {len(all_ras)}. \n")
+        self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Responses=%s expected=%s",
+                          self.ra_id, job_id,
+                          len(self.job_responses.get(job_id, {})), len(all_ras) + 1)
         #here we need len(all_ras) + 1 because all_ras does not include the main ra, the main ra cannot be detected with the function self.peer.find_peers({"peer_type": "RA"}).
         if len(self.job_responses.get(job_id, {})) >= len(all_ras)+1:
-            print(f"All RAs have responded for job {job_id}. Compiling results...")
+            self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Received offers from all RAs; compiling",
+                             self.ra_id, job_id)
             # cap-lib-Done: this function compiles all combinations based on individual response
             # a successful outcome of this function is the selected job offer, self.job_offers[job_id]
             self._compile_and_display_results(job_id)
@@ -826,7 +892,8 @@ class ResourceAgent:
                 )
             client_id = self.job_clients.get(job_id)
             if client_id:
-                print("Sending submit response failure message to client:", client_id)
+                self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Sending failure response to client=%s",
+                                  self.ra_id, job_id, client_id)
                 submit_response_message = {
                         "ra_id": self.ra_id,
                         "result": "failure",
@@ -837,9 +904,11 @@ class ResourceAgent:
             return None
         else:
             client_id = self.job_clients.get(job_id)
-            print(f"[DEBUG] send submission success msg to client: {client_id}")
+            self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Submission accepted; client=%s",
+                              self.ra_id, job_id, client_id)
             if client_id:
-                print("Sending submit response success message to client:", client_id)
+                self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Sending success response to client=%s",
+                                  self.ra_id, job_id, client_id)
                 submit_response_message = {
                         "job_id": job_id,
                         "swarm_id": job_id,
@@ -852,7 +921,8 @@ class ResourceAgent:
 
         
 
-        print("Valid resource combinations found. Selecting lead resource...")
+        self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s] Selecting lead node",
+                         self.ra_id, job_id)
         # Ze-DONE: randomly select a resource's RA node as LR
         # Ze-DONE: for demo purpose, we hardcode the lead resource to be 'ra-aws-cloud-us'
         #self.lead_resource[job_id] = next((k for k, v in self.job_offers[job_id].items() if v.get('ra_id') == 'ra-aws-cloud-us'), None)
@@ -889,13 +959,13 @@ class ResourceAgent:
         #print(f"[DEBUG] lead_resource for job {job_id} is {self.lead_resource[job_id]}")
         # 3. Safely extract the details from the chosen Lead Resource
         selected_ms = self.lead_resource[job_id]
-        print(f"[DEBUG] selected ms is {selected_ms}")
-
+        self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s] Selected lead node=%s",
+                          self.ra_id, job_id, selected_ms)
         if selected_ms:
             # Get the keys and ensure there is at least one offer
             offer_keys = list(self.job_offers[job_id][selected_ms].keys())
             if not offer_keys:
-                print(f"[ERROR] Microservice {selected_ms} has no offers!")
+                self.logger.error(f"Microservice {selected_ms} has no offers!")
                 return
                
             offer_id = offer_keys[0]
@@ -907,9 +977,10 @@ class ResourceAgent:
             provider = ids.get("provider_id")
             instance_type = ids.get("res_id")
             
-            print(f"[DEBUG] Lead Resource selected: {selected_ms} (RA: {LR_id})")
+            self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Lead node assigned to RA=%s",
+                             self.ra_id, job_id, selected_ms, LR_id)
         else:
-            print("[ERROR] No valid lead resource found!")
+            self.logger.error("No valid lead resource found!")
             return
 
         # # Ze-DONE: New approach to select the best offer based on resource capacity
@@ -974,7 +1045,8 @@ class ResourceAgent:
             
         all_ras = self.peer.find_peers({"peer_type": "RA"})
         all_ras += [self.ra_id] # add the main RA to the list of RAs to be informed, because the main RA also needs to update its capacity status based on the selected offer
-        print("all_ras in the network are: ", all_ras)
+        self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Notifying RAs of selection: %s",
+                          self.ra_id, job_id, all_ras)
         for ra_id in all_ras:
             #print(f"Sending selected offer to RA {ra_id} from RA {self.ra_id}")
             self.peer.send(ra_id, "MSG_SELECTED_OFFER", msg_selected_offer)
@@ -982,11 +1054,11 @@ class ResourceAgent:
               
 
         if _os.getenv("AUTO_APPROVE", "false") == "true":
-            print("AUTO_APPROVE is enabled, automatically proceeding with lead resource creation...")
+            self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s] AUTO_APPROVE enabled",
+                              self.ra_id, job_id)
             time.sleep(2)  # Simulate a brief pause for realism
         else:
-            print("Press a key to continue:")
-            key_to_continue = input()
+            key_to_continue = input("Press a key to continue: ")
         msg_lead_resource_request_ra = {
                 "job_id": job_id,
                 "hub_ra": self.peer.peer_id,
@@ -1002,8 +1074,10 @@ class ResourceAgent:
         }
         
         self.peer.send(LR_id, "MSG_CREATE_LEAD_RESOURCE", msg_lead_resource_request_ra)
-        self.logger.info(f"Sent resource request to RA: {LR_id}")
-        print("lens of job offer is: ",len(self.job_offers[job_id])-1)
+        self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Lead-node request sent to RA=%s",
+                         self.ra_id, job_id, selected_ms, LR_id)
+        self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s] Selected node entries: %s",
+                          self.ra_id, job_id, len(self.job_offers[job_id]))
 
     
     # cap-lib-DONE: this function should be modified to create all combination
@@ -1011,8 +1085,8 @@ class ResourceAgent:
         """
         Collect all resource responses, compile and display all combinations
         """
-        print("\nCompiling resource offers...")
-        print("=" * 60)
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Compiling resource offers",
+                         self.ra_id, job_id)
 
         ra_responses = self.job_responses.get(job_id, {})
 
@@ -1023,22 +1097,21 @@ class ResourceAgent:
                 all_resource_names.update(ra_data['responses'].keys())
 
         if not all_resource_names:
-            print("No resource requirements found")
+            self.logger.error("[STAGE=OFFERS RA=%s APP=%s] No resource requirements found",
+                              self.ra_id, job_id)
             return
 
         # Display response matrix
         
         requirements = self.tosca[job_id].get_requirements()
         resource_names = sorted(requirements)
-        print("Response Summary:")
-        print("-" * 60)
+        self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Response summary", self.ra_id, job_id)
         
         # Create table header
         header = f"{'RA (Provider)':<30}"
         for resource_name in resource_names:
             header += f"{resource_name.title():<15}"
-        print(header)
-        print("-" * (20 + len(resource_names) * 15))
+        self.logger.debug(header)
 
         # Create table rows
         for ra_id, ra_data in ra_responses.items():
@@ -1060,10 +1133,10 @@ class ResourceAgent:
                             answer = "Yes"
 
                 row += f"{answer}"[:14].ljust(15)
-            print(row)
+            self.logger.debug(row)
 
-        print("\nFinding valid combinations...")
-        print("=" * 60)
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Building combined offers",
+                         self.ra_id, job_id)
         #print(f"[DEBUG] resource_names: {resource_names}")
         # Find feasible resource combinations
         ra_responses = self._transform_ra_responses(ra_responses) # transform the ra_responses to make it easier to find combinations
@@ -1083,15 +1156,11 @@ class ResourceAgent:
         # print(f"[DEBUG] Testing valid combinations loaded from file: {filename}")
         
         trust_scores = self._get_trust_scores_for_offers(job_id, valid_combinations)
-        print(f"[DEBUG] Trust scores retrieved from OptimusDB: {trust_scores}")
-
-
-
-
+        self.logger.debug("[STAGE=RANKING RA=%s APP=%s] Trust scores: %s",
+                          self.ra_id, job_id, trust_scores)
         if valid_combinations:
-            print(f"Found {len(valid_combinations)} valid combination(s):")
-            print("-" * 60)
-            print("Possible offers:")
+            self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Valid combined offers: %s",
+                             self.ra_id, job_id, len(valid_combinations))
             
             # Use .values() to get the dictionary data, not just the "combination_1" string
             for i, combination in enumerate(valid_combinations.values(), 1):
@@ -1121,9 +1190,9 @@ class ResourceAgent:
                         resource_items.append(f"{ms_id}: {ra_id}")
 
                 combo_str = f"{i}. " + ", ".join(resource_items)
-                print(combo_str)
-                print(f"   >> Total energy: {energy_consumption:.2f} | Bandwidth: {total_bandwidth} | Price: {total_price:.2f} | Reliability: {total_reliability:.2f}")
-            print("-" * 60)
+                self.logger.debug("[STAGE=RANKING RA=%s APP=%s] %s; energy=%.2f bandwidth=%s price=%.2f reliability=%.2f",
+                                  self.ra_id, job_id, combo_str, energy_consumption,
+                                  total_bandwidth, total_price, total_reliability)
             
             # Randomly select one combination
             # Ze：we will use AI algorithm to select the best combination instead of random selection
@@ -1140,8 +1209,8 @@ class ResourceAgent:
             selected_combination = valid_combinations[selected_key]
             #selected_combination = valid_combinations[selected_index]
             
-            print(f"\nSELECTED OFFER (chosen by the ranking algorithm: #{selected_index + 1}):")
-            print("=" * 60)
+            self.logger.info("[STAGE=RANKING RA=%s APP=%s] Selected combined offer #%s",
+                             self.ra_id, job_id, selected_index + 1)
             
             resource_items = []
             energy_consumption = 0
@@ -1169,11 +1238,13 @@ class ResourceAgent:
                     resource_items.append(f"{ms_id}: {ra_id}")
 
             
-            print(", ".join(resource_items))
-            print(f", total energy consumption is: {energy_consumption:.2f}, total bandwidth is: {total_bandwidth}, total price is: {total_price}, total reliability is: {total_reliability:.2f}")
-            print("=" * 60)
+            self.logger.info("[STAGE=RANKING RA=%s APP=%s] Selected nodes=%s energy=%.2f bandwidth=%s price=%.2f reliability=%.2f",
+                             self.ra_id, job_id, ", ".join(resource_items),
+                             energy_consumption, total_bandwidth, total_price,
+                             total_reliability)
         else:
-            print(f"No valid resource combinations found for job {job_id}!")
+            self.logger.error("[STAGE=OFFERS RA=%s APP=%s] No valid combined offers",
+                              self.ra_id, job_id)
             selected_combination = None
             return
         # Save valid_combinations to a JSON file
@@ -1186,7 +1257,8 @@ class ResourceAgent:
             self.job_offers[job_id] = {}
 
         self.job_offers[job_id] = selected_combination
-        print(f"job_offer for job {job_id} is {self.job_offers[job_id]}")
+        self.logger.debug("[STAGE=RANKING RA=%s APP=%s] Selected offer payload: %s",
+                          self.ra_id, job_id, self.job_offers[job_id])
         #self.peer.leave().addCallback(lambda _: self.peer.stop())
 
 
@@ -1246,7 +1318,8 @@ class ResourceAgent:
         for ra_id in ra_ids - {None}:
             cap_id = cap_ids_by_ra.get(ra_id)
             if not cap_id:
-                self.logger.warning("No CAP ID for RA %s in job %s; using default trust", ra_id, job_id)
+                self.logger.warning("[STAGE=RANKING APP=%s] No CAP ID for RA=%s; using default trust",
+                                    job_id, ra_id)
                 scores_by_ra[ra_id] = 1.0
                 continue
             if cap_id not in scores_by_cap_id:
@@ -1263,11 +1336,13 @@ class ResourceAgent:
         # 3) populate the qos_priority template
 
         qos_data = self.tosca[job_id].get_qos()
-        print(f"[DEBUG] qos_data extracted from raw TOSCA is {qos_data}")
+        self.logger.debug("[STAGE=RANKING RA=%s APP=%s] SAT QoS: %s",
+                          self.ra_id, job_id, qos_data)
         qos_priority = get_qos_priorities(qos_data)
-        print(f"[DEBUG] qos_priority extracted from TOSCA is {qos_priority}")
+        self.logger.debug("[STAGE=RANKING RA=%s APP=%s] QoS priorities: %s",
+                          self.ra_id, job_id, qos_priority)
         if not qos_priority:
-            print("[WARN] No QoS priorities found in TOSCA, using default priorities")
+            self.logger.warning("No QoS priorities found in TOSCA, using default priorities")
             qos_priority = {
                 "reliability": 1,
                 "latency": 1,
@@ -1283,7 +1358,8 @@ class ResourceAgent:
 
         if trust_scores is None:
             trust_scores = self._get_trust_scores_for_offers(job_id, valid_combinations)
-        print(f"[DEBUG] Trust scores retrieved from OptimusDB: {trust_scores}")
+        self.logger.debug("[STAGE=RANKING RA=%s APP=%s] Trust scores: %s",
+                          self.ra_id, job_id, trust_scores)
         # Ze: for each combination we calculate its qos
         for combination_data in valid_combinations.values():
             total_energy = 0
@@ -1316,7 +1392,8 @@ class ResourceAgent:
             price_list.append(total_price)
             # Ze-TODO: here we assume reliability and latency are not present in RA's CDT
             reliability_list.append(total_reliability)
-            print(f"[DEBUG] total_reliability for combination is {total_reliability}")
+            self.logger.debug("[STAGE=RANKING RA=%s APP=%s] Combined-offer reliability=%.2f",
+                              self.ra_id, job_id, total_reliability)
             latency_list.append(1)
 
 
@@ -1382,8 +1459,9 @@ class ResourceAgent:
                 offer accept -> set deploy (assigned -> deployed)
                 offer delete / reconfigured -> set undeploy (assigned -> undeploy)
         """
-        self.logger.info(f"RA {self.ra_id} received the selected offer, now it will update the capacity registry accordingly")
         job_id = message.get('job_id')
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Applying selected offer",
+                         self.ra_id, job_id)
         if job_id in self.deleted_jobs or job_id in self.pending_deletions:
             return
         the_selected_offer = message.get('offer_info', {})
@@ -1393,7 +1471,7 @@ class ResourceAgent:
         
 #        print(f"[DEBUG]all_offers in capacity registry for job {job_id} is {all_offers}")
 
-        self.capreg.dump_capacity_registry_info()
+        self._maybe_dump_capacity("before selection update", job_id)
         # Ze-TODO: this may be wrong
         # # for all resources
         # for ms_id in all_offers.keys():
@@ -1428,8 +1506,9 @@ class ResourceAgent:
                     self.capreg.resource_offer_reject(offer_id, offer)
                     
 
-        self.logger.info(f"RA {self.ra_id} updated the capacity registry based on the selected offer")
-        self.capreg.dump_capacity_registry_info()
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Selected offers assigned; remaining reservations released",
+                         self.ra_id, job_id)
+        self._maybe_dump_capacity("selected offers assigned and unselected offers released", job_id)
 
 
     def _get_cluster_name(self, job_id):
@@ -1456,8 +1535,9 @@ class ResourceAgent:
             Ze:
             The RA which receives this msg will create the lead resource (LR) VM, k3s cluster, and return the master info to the hub RA.
         """
-        self.logger.info(f"RA {self.ra_id} receives create lead resource request from {peer_id}")
         job_id = message.get('job_id')
+        self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s] Lead-node request received from %s",
+                         self.ra_id, job_id, peer_id)
         if job_id in self.deleted_jobs or job_id in self.pending_deletions:
             return
         LR = message.get('lead_resource')
@@ -1468,12 +1548,12 @@ class ResourceAgent:
         k3s_role = instance["k3s_role"]
         node_name = instance["node-name"]
         tosca = message.get('tosca', {})
-        print(f"[DEBUG] information from instance node name is  {node_name}, {cloud}")
-
+        self.logger.debug(f"information from instance node name is  {node_name}, {cloud}")
         self.job_capreg_allocated[job_id] = True # set the flag to indicate that the resources for this job have been allocated in the capacity registry, this is used to decide whether we need to release the resource offer when the job is deleted
 
         offer_info = message.get('offer_info', {})
-        print(f"offer_info received by LR is {offer_info}")
+        self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s] Selected offer payload: %s",
+                          self.ra_id, job_id, offer_info)
             # Get the offer info of the resource(s) to deploy
         selected_offer = offer_info[lead_resource_name]
         selected_offer_id, selected_offer_data = next(iter(selected_offer.items()))
@@ -1481,11 +1561,11 @@ class ResourceAgent:
         lead_resource_offer = {original_ms_id: selected_offer}
 
         if _os.getenv("AUTO_APPROVE", "false") == "true":
-            print("AUTO_APPROVE is enabled, automatically proceeding with lead resource creation...")
+            self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s] AUTO_APPROVE enabled",
+                              self.ra_id, job_id)
             time.sleep(2)  # Simulate a brief pause for realism
         else:
-            print("Press a key to continue:")
-            key_to_continue = input()
+            key_to_continue = input("Press a key to continue: ")
 
         # Ze-done: finish the RA which receives the msg and to create a VM
         if(LR):
@@ -1496,7 +1576,8 @@ class ResourceAgent:
 
             # Get the offer info of the resource(s) to deploy
             lead_resource_offer = {original_ms_id: selected_offer}
-            print(f"offer_info received by LR is {lead_resource_offer} \n")
+            self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Lead offer: %s",
+                              self.ra_id, job_id, node_name, lead_resource_offer)
             ms_name = next(iter(lead_resource_offer))
             offer_id = next(iter(lead_resource_offer[ms_name]))
             lead_resource_ids = lead_resource_offer[ms_name][offer_id]
@@ -1506,15 +1587,12 @@ class ResourceAgent:
 
             # Generate the RDT based on the resource offer info
             rdt = cdt.generate_rdt(lead_resource_offer)
-            print(f"[DEBUG] rdt is {rdt} \n")
-
+            self.logger.debug(f"rdt is {rdt} \n")
             # Get the cluster info
             cluster_info = Sardou(content=rdt).get_cluster()
-            print(f"[DEBUG] cluster_info is {cluster_info} \n")
-            
+            self.logger.debug(f"cluster_info is {cluster_info} \n")
             node_info = next(iter(cluster_info.values()), {})
-            print(f"[DEBUG] node_info is {node_info} \n")
-            
+            self.logger.debug(f"node_info is {node_info} \n")
             # Ze-DONE: dynamically handle capacity type and key path
             # Ze-TODO: why the key for fetching key_name is different across clouds?
             cloud_type = lead_resource_ids["ids"]["res_type"]
@@ -1525,12 +1603,10 @@ class ResourceAgent:
                 cloud = lead_resource_ids["ids"]["provider_id"]
                 if cloud == "openstack":
                     ssh_key_path = node_info.get("key_name", "")
-            print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
-            
+            self.logger.debug(f"cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
             # Ze-TODO: temp_port support, should be replaced by fetching from get_cluster() function
             ssh_port = node_info.get("ssh_port", "22")
-            print(f"[DEBUG] ssh_port is {ssh_port} \n")
-
+            self.logger.debug(f"ssh_port is {ssh_port} \n")
             #if self.ra_id == "UST-RA":
             #    ssh_port = 10001
             #    print(f"[DEBUG] ra_id {self.ra_id} is UST-RA, ssh_port is {ssh_port}\n")
@@ -1558,7 +1634,8 @@ class ResourceAgent:
             openstack_network_id = node_info.get("network_id", "")
             openstack_flavor_name = node_info.get("flavor_name", "")
 
-            print(f"ssh_user is {ssh_user}, ssh_key_path is {ssh_key_path}")
+            self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] SSH user=%s key=%s",
+                              self.ra_id, job_id, node_name, ssh_user, ssh_key_path)
 
             ports = json.dumps([
                 {
@@ -1630,14 +1707,18 @@ class ResourceAgent:
 
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             if self.dry_run:
-                self.logger.info(f"Dry run enabled. Would create lead resource with the following configuration: {json.dumps(master_node, indent=2)}")
+                self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Dry run: lead node creation skipped",
+                                 self.ra_id, job_id, node_name)
+                self.logger.debug("Lead-node configuration: %s",
+                                  json.dumps(self._redact_sensitive(master_node), indent=2))
                 k3s_token = "dry-run-token"
                 cluster_name = self._get_cluster_name(job_id)
                 master_ip = "dry-run-ip"
             else:
-                self.logger.info(
-                    "Cluster-builder add_node input for master (job %s):\n%s",
-                    job_id, json.dumps(master_node, indent=2),
+                self.logger.debug(
+                    "[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Cluster-builder lead-node input:\n%s",
+                    self.ra_id, job_id, node_name,
+                    json.dumps(self._redact_sensitive(master_node), indent=2),
                 )
                 outputs = swarmchestrate.add_node(master_node, dryrun=self.dry_run)
 
@@ -1653,7 +1734,7 @@ class ResourceAgent:
                 self.capreg.resource_set_deployed(
                     job_id, original_ms_id, res_set["restype"],
                     res_set["resid"], res_set["count"])
-            self.capreg.dump_capacity_registry_info()
+            self._maybe_dump_capacity("lead node allocated", job_id)
 
 
 
@@ -1693,7 +1774,8 @@ class ResourceAgent:
                     else:
                         _shutil.copy2(src_path, dest_path)
             else:
-                print(f"⚠️ Warning: Source folder '{src_folder}' does not exist.")
+                self.logger.warning("[STAGE=DEPLOYMENT RA=%s APP=%s] Source folder does not exist: %s",
+                                    self.ra_id, job_id, src_folder)
             
             # prepare configmap of tosca file for SA
             configMap_tosca_path = f"output/cluster_{cluster_name}/k3s-{job_id}/03-configmap-swarm-agent-tosca.yaml"
@@ -1740,8 +1822,7 @@ class ResourceAgent:
             #     sys.exit(f"Error: {e}")
 
             # print(f"✅ Kubernetes manifests written to '{OUTPUT_FILE}' ({len(manifests)} items)\n")
-            print(f"[DEBUG] right before creating registry secret on LR, port is {ssh_port}\n")
-
+            self.logger.debug(f"right before creating registry secret on LR, port is {ssh_port}\n")
             # Ze-DONE: Create registry secret on the LR using cluster-builder library
             # Ze-DONE
             registry_config = {
@@ -1753,7 +1834,7 @@ class ResourceAgent:
                #"namespace":"test" , #optional
             }
             if self.dry_run:
-                print(f"[DEBUG] Dry run enabled. Skipping registry secret creation for job {job_id}.")
+                self.logger.debug("[STAGE=DEPLOYMENT APP=%s] Dry run: registry secret creation skipped", job_id)
             else:
                 # Run the registry secret creation
                 swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
@@ -1762,7 +1843,7 @@ class ResourceAgent:
             # Ze-TODO: until here were commented
             # Use absolute path to ensure OpenTofu can find it from any directory
             absolute_path = os.path.abspath(f"output/cluster_{cluster_name}/k3s-{job_id}")
-            print(f"[DEBUG] ssh_port before applying manifests is {ssh_port}\n")
+            self.logger.debug(f"ssh_port before applying manifests is {ssh_port}\n")
             # copy the manifests from k3s-{job_id}/ to the LR
             manifest_cfg = (
                 f'{{"manifest_folder": "{absolute_path}",'
@@ -1778,7 +1859,7 @@ class ResourceAgent:
             manifest_folder.exists() or exit(f"❌ Manifest folder does not exist: {manifest_folder}")
             # Run cluster-builder copy-manifest
             if self.dry_run:
-                print(f"[DEBUG] Dry run enabled. Skipping manifest deployment for job {job_id}.")
+                self.logger.debug("[STAGE=DEPLOYMENT APP=%s] Dry run: manifest deployment skipped", job_id)
             else:
                 Swarmchestrate(template_dir="templates", output_dir="output").deploy_manifests(
                 manifest_folder=str(manifest_folder),
@@ -1798,10 +1879,9 @@ class ResourceAgent:
             #   2) the master node is in a private cloud, in this case we need cloud_device_local_ip as well
             if edge_device_local_ip:
                 master_ip = edge_device_local_ip
-                print(f"[DEBUG] master ip before sending master_info {master_ip} is from edge_device_local_ip")
+                self.logger.debug(f"master ip before sending master_info {master_ip} is from edge_device_local_ip")
             else:
-                print(f"[DEBUG] master ip before sending master_info {master_ip} is not from edge_device_local_ip")
-
+                self.logger.debug(f"master ip before sending master_info {master_ip} is not from edge_device_local_ip")
             # Ze: send k3s master info back to the hub RA, so that other RAs can create worker nodes and join the cluster
             msg_master_info = {
                 "job_id": job_id,
@@ -1810,13 +1890,15 @@ class ResourceAgent:
                 "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip}
             }
             self.peer.send(message.get('hub_ra'), "MSG_MASTER_INFO", msg_master_info)
-            self.logger.info(f"RA {self.ra_id} instantiates the lead resource")
+            self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Lead node created; cluster=%s",
+                             self.ra_id, job_id, node_name, cluster_name)
  
     async def _handle_master_info(self, peer_id, message):
         """Process master info from lead resource"""
-        self.logger.info(f"RA {self.ra_id} receives master info from {peer_id}")
         import asyncio
         job_id = message.get("job_id")
+        self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s] Lead node ready; dispatching workers",
+                         self.ra_id, job_id)
         master_info = message.get("master_info", {})
 
         k3s_token = master_info["k3s_token"]
@@ -1837,10 +1919,12 @@ class ResourceAgent:
             
             # 2. Reach into the "ids" block to get the ra_id
             ra_id = offer_data["ids"]["ra_id"]
-            print(f"Service: {res} | RA ID: {ra_id}")
+            self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Assigned worker RA=%s",
+                              self.ra_id, job_id, res, ra_id)
 
             if res == self.lead_resource[job_id]:
-                print(f"Skipping lead resource {res} with RA ID {ra_id}")
+                self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Lead node excluded from worker dispatch",
+                                  self.ra_id, job_id, res)
                 continue
 
             msg_create_resource = {
@@ -1861,7 +1945,9 @@ class ResourceAgent:
                     "master_ip": master_ip,
                 },
             }
-            print(f"[DEBUG] Sending create resource for {res} to RA {ra_id} with message: {msg_create_resource}")
+            self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Sending worker request to RA=%s payload=%s",
+                              self.ra_id, job_id, res, ra_id,
+                              self._redact_sensitive(msg_create_resource))
             # Approach 2: peer.send is blocking -> run it in a thread, schedule concurrently
             tasks.append(
                 asyncio.create_task(
@@ -1876,6 +1962,8 @@ class ResourceAgent:
         # Ze-DEBUG
         #self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
         self._update_job_state(job_id, "Running")
+        self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s] Worker requests dispatched: %s",
+                         self.ra_id, job_id, len(tasks))
 
     # sync wrapper for the library
     def _handle_master_info_cb(self, peer_id, message):
@@ -1916,7 +2004,6 @@ class ResourceAgent:
 
     def _handle_create_resource_blocking(self, peer_id, message):
         """Process create resource request from LRA"""
-        self.logger.info(f"RA {self.ra_id} receives create resource request from {peer_id}")
         job_id = message.get('job_id')
         if job_id in self.deleted_jobs or job_id in self.pending_deletions:
             return
@@ -1926,35 +2013,36 @@ class ResourceAgent:
         instance = message.get('instance', {})
         offer_id, offer_data = next(iter(instance["resource"].items()))
     
-        print(f"[DEBUG]  Offer_data is: mainly to check whether there is resource count? \n {offer_data} \n")
-        
+        self.logger.debug(f" Offer_data is: mainly to check whether there is resource count? \n {offer_data} \n")
         # 2. Reach into the "ids" block to get the ra_id
         k3s_role = instance["k3s_role"]
        #resource_name = instance["node-name"]
         resource_name = offer_data["ids"]["ms_id"]
         node_name = instance["node-name"]
+        self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Worker-node request received from %s",
+                         self.ra_id, job_id, node_name, peer_id)
         self.master_info = message.get('master_info')
         cluster_name = self.master_info["cluster_name"]
         master_ip = self.master_info["master_ip"]
         k3s_token = self.master_info["k3s_token"]
-        print(f"[DEBUG]  k3s_role is {k3s_role}, resource_name is {resource_name}, cluster_name is {cluster_name}, master_ip is {master_ip}, k3s_token is {k3s_token}")
-        
+        self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] role=%s resource=%s cluster=%s master_ip=%s token=<redacted>",
+                          self.ra_id, job_id, node_name, k3s_role,
+                          resource_name, cluster_name, master_ip)
         # Get the offer info of the resource(s) to deploy
         resource_offer = {resource_name: {offer_id: offer_data}}
 
-        print(f"resource offer is received by worker node is {resource_offer}")
+        self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Worker offer: %s",
+                          self.ra_id, job_id, node_name, resource_offer)
 
         # Get a Sardou object of the CDT
         cdt = Sardou(self.capacity_file)
 
         # Generate the RDT based on the resource offer info
         rdt = cdt.generate_rdt(resource_offer)
-        print(f"[DEBUG] rdt is {rdt}\n")
-
+        self.logger.debug(f"rdt is {rdt}\n")
         # Get the cluster info
         cluster_info = Sardou(content=rdt).get_cluster()
-        print(f"[DEBUG] cluster_info is {cluster_info}\n")
-        
+        self.logger.debug(f"cluster_info is {cluster_info}\n")
         node_info = next(iter(cluster_info.values()), {})
         labels = self._get_instance_node_labels(job_id, node_info)
         if resource_name != node_name:
@@ -1972,8 +2060,7 @@ class ResourceAgent:
             if cloud == "openstack":
                 ssh_key_path = node_info.get("key_name", "")
         
-        print(f"[DEBUG] cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
-        
+        self.logger.debug(f"cloud is {cloud}, ssh_key path is {ssh_key_path} \n")
         # general
         ssh_user = node_info.get("ssh_user", "ubuntu")
         ssh_port = node_info.get("ssh_port", "22")
@@ -1996,7 +2083,7 @@ class ResourceAgent:
         # The hub sends one message for each selected offer, so this call
         # creates exactly one node even when the SAT requests several hosts.
         for i in range(1):
-            print(f"[DEBUG] cloud is {cloud}")
+            self.logger.debug(f"cloud is {cloud}")
             # One selected offer creates one node; the hub supplies its unique name.
             worker_node_aws = (
                     f'{{"cloud": "aws",' # Ze: we can make it dynamic fetch from offer. Each RA could access multiple providers so this cannot be collected from config file
@@ -2056,16 +2143,21 @@ class ResourceAgent:
                     "openstack": worker_node_openstack,
                     "edge": worker_node_edge
                 }[cloud]
-            print(f"ssh_user is {ssh_user}")
+            self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] SSH user=%s key=%s",
+                              self.ra_id, job_id, node_name, ssh_user, ssh_key_path)
             
             worker_node = json.loads(worker_node)
             swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
             if self.dry_run:
-                self.logger.info(f"Dry run enabled. Would create worker node with the following configuration: {json.dumps(worker_node, indent=2)}")
+                self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Dry run: worker creation skipped",
+                                 self.ra_id, job_id, node_name)
+                self.logger.debug("Worker-node configuration: %s",
+                                  json.dumps(self._redact_sensitive(worker_node), indent=2))
             else:
-                self.logger.info(
-                    "Cluster-builder add_node input for worker (job %s):\n%s",
-                    job_id, json.dumps(worker_node, indent=2),
+                self.logger.debug(
+                    "[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Cluster-builder worker input:\n%s",
+                    self.ra_id, job_id, node_name,
+                    json.dumps(self._redact_sensitive(worker_node), indent=2),
                 )
                 swarmchestrate.add_node(worker_node, dryrun=self.dry_run)
 
@@ -2075,7 +2167,9 @@ class ResourceAgent:
                 self.capreg.resource_set_deployed(
                     job_id, resource_name, res_set["restype"],
                     res_set["resid"], res_set["count"])
-            self.capreg.dump_capacity_registry_info()
+            self._maybe_dump_capacity(f"worker node {node_name} allocated", job_id)
+            self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Worker node created; cluster=%s",
+                             self.ra_id, job_id, node_name, cluster_name)
         
 
     # # Ze-done: finish the RA which receives the msg and to create a VM

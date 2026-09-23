@@ -3,6 +3,7 @@
 import ast
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -36,7 +37,9 @@ def agent_class():
              '_find_valid_combinations', '_get_instance_node_labels',
              '_handle_create_lead_resource', '_handle_create_resource_blocking',
              '_handle_selected_offer', '_get_trust_scores_for_offers',
-             '_offer_instances', '_first_offer_instance'}
+             '_offer_instances', '_first_offer_instance',
+             '_maybe_dump_capacity', '_redact_sensitive',
+             '_setting_enabled', '_new_application_id'}
     cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
                 and node.name in names]
     # JSON is a YAML subset; use it to exercise file plumbing without PyYAML.
@@ -46,12 +49,35 @@ def agent_class():
              'yaml': types.SimpleNamespace(safe_load=json.load, dump=json.dumps),
              'write_yaml': write_yaml, 'time': Mock(),
              'copy': types.SimpleNamespace(deepcopy=deepcopy),
-             'product': __import__('itertools').product}
+             'product': __import__('itertools').product, '_os': os,
+             'datetime': __import__('datetime').datetime}
     exec(compile(ast.Module(body=[cls], type_ignores=[]), 'ra_base.py', 'exec'), scope)
     return scope['ResourceAgent']
 
 
 class ExpansionTests(unittest.TestCase):
+    def test_application_id_and_log_controls(self):
+        agent = agent_class()()
+        fixed = __import__('datetime').datetime(2026, 9, 23, 16, 45, 12, 123000)
+        self.assertEqual(agent._new_application_id(fixed), 'app-20260923-164512-123')
+        with patch.dict(os.environ, {'RA_LOG_LEVEL': 'DEBUG', 'RA_CAPACITY_DUMP': 'true'}):
+            self.assertTrue(agent._setting_enabled('RA_CAPACITY_DUMP'))
+        self.assertEqual(agent._redact_sensitive({
+            'master_ip': '10.0.0.1', 'k3s_token': 'secret-value',
+            'nested': {'password': 'pw', 'key_name': 'visible'}}), {
+                'master_ip': '10.0.0.1', 'k3s_token': '<redacted>',
+                'nested': {'password': '<redacted>', 'key_name': 'visible'}})
+
+        agent.capacity_dump_enabled = False
+        agent.ra_id = 'ra-test'
+        agent.logger = Mock()
+        agent.capreg = Mock()
+        agent._maybe_dump_capacity('test', 'app-id')
+        agent.capreg.dump_capacity_registry_info.assert_not_called()
+        agent.capacity_dump_enabled = True
+        agent._maybe_dump_capacity('test', 'app-id')
+        agent.capreg.dump_capacity_registry_info.assert_called_once()
+
     def test_labels_restore_only_known_instances_and_preserve_other_labels(self):
         agent = agent_class()()
         scope = agent._get_instance_node_labels.__globals__
