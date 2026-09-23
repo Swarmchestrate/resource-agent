@@ -140,7 +140,7 @@ class ResourceAgent:
             self.logger.info("[STAGE=INIT RA=%s CAP=%s] Resolving CDT", self.ra_id, self.ra_cap_id)
             download = KBClient.download_CDT_from_KB(self.ra_cap_id)
             if download["success"]:
-                self.logger.info("[STAGE=INIT RA=%s CAP=%s] CDT downloaded from KB: %s",
+                self.logger.info("[STAGE=INIT RA=%s CAP=%s] CDT downloaded from OptimusDB: %s",
                                  self.ra_id, self.ra_cap_id, download['filename'])
                 self.logger.debug("[STAGE=INIT RA=%s CAP=%s] CDT content: %s",
                                   self.ra_id, self.ra_cap_id, download['data'])
@@ -164,7 +164,7 @@ class ResourceAgent:
                                      self.ra_id, self.ra_cap_id)
             # Ze-DONE: no online resource then we go for offline submitted by the user
             else:
-                self.logger.error(f"RA-{self.ra_id}: Download from KB failed: {download['error']}, the CDT file may not exist in KB, try finding from local input and uploading it to KB")
+                self.logger.error(f"RA-{self.ra_id}: Download from OptimusDB failed: {download['error']}, the CDT file may not exist in OptimusDB, try finding from local input and uploading it to OptimusDB")
                 if self.capacity_file:
                     with open(self.capacity_file) as stream:
                         try:
@@ -174,9 +174,9 @@ class ResourceAgent:
                     parsed_capacity = yaml.safe_load(capacity_content)
                     upload = KBClient.upload_CDT_to_KB(self.ra_cap_id, parsed_capacity)
                     if upload["success"]:
-                        self.logger.info(f"RA-{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
+                        self.logger.info(f"RA-{self.ra_id}: {upload['filename']} uploaded successfully to OptimusDB")
                     else:
-                        self.logger.error(f"RA-{self.ra_id}: Upload to KB failed: {upload['error']}")
+                        self.logger.error(f"RA-{self.ra_id}: Upload to OptimusDB failed: {upload['error']}")
                 else:
                     self.logger.error(f"RA-{self.ra_id}: No capacity_file specified, cannot load CDT")
                     raise Exception("No capacity_file specified, cannot load CDT")
@@ -192,9 +192,9 @@ class ResourceAgent:
                 # Ze: in the case of no cap_id, we upload with ra_id
                 upload = KBClient.upload_CDT_to_KB(self.ra_id, parsed_capacity)
                 if upload["success"]:
-                    self.logger.info(f"RA-{self.ra_id}: {upload['filename']} uploaded successfuly to KB")
+                    self.logger.info(f"RA-{self.ra_id}: {upload['filename']} uploaded successfully to OptimusDB")
                 else:
-                    self.logger.error(f"RA-{self.ra_id}: Upload to KB failed: {upload['error']}")
+                    self.logger.error(f"RA-{self.ra_id}: Upload to OptimusDB failed: {upload['error']}")
             else:
                 self.logger.error(f"RA-{self.ra_id}: No capacity_file specified, cannot load CDT")
                 raise Exception("No capacity_file specified, cannot load CDT")
@@ -599,23 +599,24 @@ class ResourceAgent:
             upload = KBClient.upload_SAT_to_KB(job_id, self.job_tosca[job_id])
             if upload["success"]:
                 # Should be a info log
-                self.logger.info("[STAGE=OFFERS RA=%s APP=%s] SAT uploaded to KB: %s",
+                self.logger.info("[STAGE=OFFERS RA=%s APP=%s] SAT uploaded to OptimusDB: %s",
                                  self.ra_id, job_id, upload['filename'])
             else:
                 # Should be an error log
-                raise RuntimeError(f"Upload to KB failed: {upload['error']}")
+                raise RuntimeError(f"Upload to OptimusDB failed: {upload['error']}")
 
             download = KBClient.download_SAT_from_KB(job_id)
             if download["success"]:
                 # Should be an info log
-                self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] SAT downloaded from KB: %s; content=%s",
+                self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] SAT downloaded from OptimusDB: %s; content=%s",
                                   self.ra_id, job_id, download['filename'], download['data'])
             else:
                 # Should be an error log
-                raise RuntimeError(f"Download from KB failed: {download['error']}")
+                raise RuntimeError(f"Download from OptimusDB failed: {download['error']}")
 
 
             ask_yaml = self.tosca[job_id].get_requirements()
+            self._log_sat_requirements(job_id, ask_yaml)
             self._update_job_state(job_id, "Initialising")
             client_id = message.get('client_id')
             all_ras = self.peer.find_peers({"peer_type": "RA"})
@@ -775,13 +776,13 @@ class ResourceAgent:
         ask_yaml = KBClient.download_SAT_from_KB(job_id)
         if ask_yaml:
             # Should be an info log
-            self.logger.info(f"RA{self.ra_id}: {ask_yaml['filename']} downloaded successfuly from KB")
+            self.logger.info(f"RA{self.ra_id}: {ask_yaml['filename']} downloaded successfully from OptimusDB")
             #print(f"RA{self.ra_id}: {ask_yaml['filename']} downloaded successfuly from KB")
             self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Downloaded SAT: %s",
                               self.ra_id, job_id, ask_yaml["data"])
         else:
             # Should be an error log
-            self.logger.error(f"RA{self.ra_id}: Download from KB failed: {ask_yaml['error']}")
+            self.logger.error(f"RA{self.ra_id}: Download from OptimusDB failed: {ask_yaml['error']}")
 
         hub_ra = message.get('hub_ra')
         all_ras = self.peer.find_peers({"peer_type": "RA"})
@@ -810,8 +811,8 @@ class ResourceAgent:
         # original SAT intact so the registry can reserve a complete count-aware
         # offer atomically.
         offers = self.capreg.resource_offer_generate_from_SAT_file(job_id, ask_yaml)
-        self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Generated offers:\n%s",
-                          self.ra_id, job_id, yaml.dump(offers))
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Complete offers returned by lib_cap:\n%s",
+                         self.ra_id, job_id, yaml.dump(offers))
         self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Offer generation completed: requirements=%s",
                          self.ra_id, job_id, len(offers))
         self._maybe_dump_capacity("offers reserved", job_id)
@@ -862,6 +863,9 @@ class ResourceAgent:
             'cap_id': message.get('cap_id'),
             'responses': responses
         }
+        sat = self.tosca.get(job_id)
+        requirements = sat.get_requirements() if sat else {}
+        self._log_resource_responses(job_id, ra_id, responses, requirements)
 
         # Check if all RAs have responded
         all_ras = self.peer.find_peers({"peer_type": "RA"})
@@ -1105,21 +1109,22 @@ class ResourceAgent:
         
         requirements = self.tosca[job_id].get_requirements()
         resource_names = sorted(requirements)
-        self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Response summary", self.ra_id, job_id)
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Resource offer response summary:",
+                         self.ra_id, job_id)
         
         # Create table header
         header = f"{'RA (Provider)':<30}"
         for resource_name in resource_names:
             header += f"{resource_name.title():<15}"
-        self.logger.debug(header)
+        self.logger.info("%s", header.rstrip())
 
         # Create table rows
         for ra_id, ra_data in ra_responses.items():
             provider = ra_data['provider']
             responses = ra_data['responses']
             
-            # row = f"{ra_id} ({provider})"[:29].ljust(30)
-            row = f"{ra_id} "[:29].ljust(30)
+            ra_provider = f"{ra_id} ({provider})" if provider else str(ra_id)
+            row = ra_provider[:29].ljust(30)
             # implement logic that answer is yes if resource is in the response and has 'ids' and 'characteristics' keys, otherwise is no
 
             for resource_name in resource_names:
@@ -1133,9 +1138,9 @@ class ResourceAgent:
                             answer = "Yes"
 
                 row += f"{answer}"[:14].ljust(15)
-            self.logger.debug(row)
+            self.logger.info("%s", row.rstrip())
 
-        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Building combined offers",
+        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Finding valid offer combinations",
                          self.ra_id, job_id)
         #print(f"[DEBUG] resource_names: {resource_names}")
         # Find feasible resource combinations
@@ -1295,6 +1300,66 @@ class ResourceAgent:
         if isinstance(offer, list):
             return [item for item in offer if isinstance(item, dict) and 'ids' in item]
         return []
+
+    def _log_sat_requirements(self, job_id, requirements):
+        """Display each microservice's requested resources and host count."""
+        for ms_id, requirement in sorted((requirements or {}).items()):
+            requirement = requirement if isinstance(requirement, dict) else {}
+            expression = str(requirement.get('expression', 'unspecified')).strip()
+            if expression.startswith('lambda vals:'):
+                expression = expression[len('lambda vals:'):].strip()
+            count = requirement.get('count', 1)
+            colocated = requirement.get('colocated') or []
+            suffix = f" colocated_with={colocated}" if colocated else ""
+            self.logger.info(
+                "[STAGE=OFFERS RA=%s APP=%s MS=%s] SAT requirement: requested_resources=%s count=%s%s",
+                self.ra_id, job_id, ms_id, expression, count, suffix)
+            self.logger.debug(
+                "[STAGE=OFFERS RA=%s APP=%s MS=%s] Full SAT requirement: %s",
+                self.ra_id, job_id, ms_id, requirement)
+
+    def _log_resource_responses(self, job_id, source_ra, responses, requirements=None):
+        """State which requested microservices one RA can fulfill."""
+        responses = responses or {}
+        requirements = requirements or {}
+        for ms_id in sorted(set(requirements) | set(responses)):
+            offers = responses.get(ms_id, {})
+            requirement = requirements.get(ms_id, {})
+            requested_count = (requirement.get('count', 1)
+                               if isinstance(requirement, dict) else 1)
+            if not isinstance(offers, dict):
+                self.logger.info(
+                    "[STAGE=OFFERS APP=%s] RA=%s cannot fulfill MS=%s: requested_count=%s offers=0",
+                    job_id, source_ra, ms_id, requested_count)
+                continue
+            if offers.get('colocated') and len(offers) == 1:
+                self.logger.info(
+                    "[STAGE=OFFERS APP=%s] RA=%s fulfills MS=%s through colocation with %s",
+                    job_id, source_ra, ms_id, offers['colocated'])
+                continue
+
+            instance_counts = []
+            resources = set()
+            for offer in offers.values():
+                instances = self._offer_instances(offer)
+                if not instances:
+                    continue
+                instance_counts.append(len(instances))
+                for instance in instances:
+                    ids = instance.get('ids', {})
+                    resource = (ids.get('res_id') or ids.get('resource_id') or
+                                ids.get('provider_id') or ids.get('res_type'))
+                    if resource:
+                        resources.add(str(resource))
+            can_fulfill = any(count >= requested_count for count in instance_counts)
+            outcome = "can fulfill" if can_fulfill else "cannot fulfill"
+            self.logger.info(
+                "[STAGE=OFFERS APP=%s] RA=%s %s MS=%s: requested_count=%s offers=%s offered_counts=%s resources=%s",
+                job_id, source_ra, outcome, ms_id, requested_count,
+                len(instance_counts), instance_counts, sorted(resources))
+            self.logger.debug(
+                "[STAGE=OFFERS RA=%s APP=%s MS=%s] Full resource response from RA=%s: %s",
+                self.ra_id, job_id, ms_id, source_ra, offers)
 
     @classmethod
     def _first_offer_instance(cls, offer):

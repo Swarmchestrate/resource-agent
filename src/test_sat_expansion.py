@@ -38,6 +38,7 @@ def agent_class():
              '_handle_create_lead_resource', '_handle_create_resource_blocking',
              '_handle_selected_offer', '_get_trust_scores_for_offers',
              '_offer_instances', '_first_offer_instance',
+             '_log_sat_requirements', '_log_resource_responses',
              '_maybe_dump_capacity', '_redact_sensitive',
              '_setting_enabled', '_new_application_id'}
     cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
@@ -56,6 +57,43 @@ def agent_class():
 
 
 class ExpansionTests(unittest.TestCase):
+    def test_requirement_and_ra_response_summaries(self):
+        agent = agent_class()()
+        agent.ra_id = 'ra-hub'
+        agent.logger = Mock()
+        agent._log_sat_requirements('app-1', {
+            'audio-class': {
+                'expression': 'lambda vals: (vals["host.cpu"] >= 2)',
+                'count': 3,
+            }
+        })
+        requirement_log = agent.logger.info.call_args.args
+        self.assertIn('SAT requirement', requirement_log[0])
+        self.assertEqual(requirement_log[3:6],
+                         ('audio-class', '(vals["host.cpu"] >= 2)', 3))
+
+        agent.logger.reset_mock()
+        agent._log_resource_responses('app-1', 'ra-edge', {
+            'audio-class': {'offer-set': [
+                {'ids': {'offer_id': 'offer-1', 'res_id': 'edge-a'}},
+                {'ids': {'offer_id': 'offer-2', 'res_id': 'edge-b'}},
+                {'ids': {'offer_id': 'offer-3', 'res_id': 'edge-c'}},
+            ]}
+        }, {'audio-class': {'count': 3}})
+        response_log = agent.logger.info.call_args.args
+        self.assertIn('RA=%s %s MS=%s', response_log[0])
+        self.assertEqual(response_log[1:8],
+                         ('app-1', 'ra-edge', 'can fulfill', 'audio-class', 3, 1, [3]))
+        self.assertEqual(response_log[8], ['edge-a', 'edge-b', 'edge-c'])
+
+        agent.logger.reset_mock()
+        agent._log_resource_responses(
+            'app-1', 'ra-small', {}, {'audio-class': {'count': 3}})
+        unavailable_log = agent.logger.info.call_args.args
+        self.assertEqual(unavailable_log[1:],
+                         ('app-1', 'ra-small', 'cannot fulfill',
+                          'audio-class', 3, 0, [], []))
+
     def test_application_id_and_log_controls(self):
         agent = agent_class()()
         fixed = __import__('datetime').datetime(2026, 9, 23, 16, 45, 12, 123000)
@@ -212,7 +250,13 @@ class ExpansionTests(unittest.TestCase):
         agent.ra_cap_id = 'cap-ra'
         agent.capacity = {'metadata': {}}
         agent.capreg = Mock()
-        agent.capreg.resource_offer_generate_from_SAT_file.return_value = {}
+        returned_offers = {
+            'details': {'offer-set': [
+                {'ids': {'offer_id': 'offer-1', 'res_id': 'edge-a'}},
+                {'ids': {'offer_id': 'offer-2', 'res_id': 'edge-b'}},
+            ]}
+        }
+        agent.capreg.resource_offer_generate_from_SAT_file.return_value = returned_offers
         agent.peer = Mock()
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'sat.yaml'
@@ -223,6 +267,12 @@ class ExpansionTests(unittest.TestCase):
             self.assertEqual(path.read_text(), original)
             self.assertFalse(path.with_name('sat.instances.json').exists())
             self.assertEqual(agent.peer.send.call_args.args[2]['cap_id'], 'cap-ra')
+            complete_offer_logs = [
+                call.args for call in agent.logger.info.call_args_list
+                if 'Complete offers returned by lib_cap' in call.args[0]
+            ]
+            self.assertEqual(len(complete_offer_logs), 1)
+            self.assertEqual(json.loads(complete_offer_logs[0][3]), returned_offers)
 
     def test_aggregate_capacity_offer_expands_to_named_node_instances(self):
         agent = agent_class()()
