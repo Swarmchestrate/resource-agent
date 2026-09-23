@@ -1109,23 +1109,28 @@ class ResourceAgent:
         
         requirements = self.tosca[job_id].get_requirements()
         resource_names = sorted(requirements)
-        self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Resource offer response summary:",
-                         self.ra_id, job_id)
-        
-        # Create table header
-        header = f"{'RA (Provider)':<30}"
-        for resource_name in resource_names:
-            header += f"{resource_name.title():<15}"
-        self.logger.info("%s", header.rstrip())
+        # Build one bordered matrix so the cross-RA result remains easy to scan.
+        first_column_width = max(
+            30,
+            len("RA (Provider)"),
+            *(len(f"{ra_id} ({data.get('provider')})")
+              if data.get('provider') else len(str(ra_id))
+              for ra_id, data in ra_responses.items()),
+        )
+        resource_widths = {
+            name: max(15, len(name.title())) for name in resource_names
+        }
+        header_cells = [f"{'RA (Provider)':<{first_column_width}}"]
+        header_cells.extend(
+            f"{name.title():<{resource_widths[name]}}" for name in resource_names)
+        matrix_rows = [" | ".join(header_cells).rstrip()]
 
-        # Create table rows
         for ra_id, ra_data in ra_responses.items():
             provider = ra_data['provider']
             responses = ra_data['responses']
-            
+            row_cells = []
             ra_provider = f"{ra_id} ({provider})" if provider else str(ra_id)
-            row = ra_provider[:29].ljust(30)
-            # implement logic that answer is yes if resource is in the response and has 'ids' and 'characteristics' keys, otherwise is no
+            row_cells.append(f"{ra_provider:<{first_column_width}}")
 
             for resource_name in resource_names:
                 answer = "No"
@@ -1137,8 +1142,21 @@ class ResourceAgent:
                         if any(self._offer_instances(v) for v in resource_data.values()):
                             answer = "Yes"
 
-                row += f"{answer}"[:14].ljust(15)
-            self.logger.info("%s", row.rstrip())
+                row_cells.append(f"{answer:<{resource_widths[resource_name]}}")
+            matrix_rows.append(" | ".join(row_cells).rstrip())
+
+        matrix_title = f"RESOURCE OFFER RESPONSE SUMMARY — APP {job_id}"
+        separator = "=" * max(len(matrix_title), *(len(row) for row in matrix_rows))
+        matrix = "\n".join([
+            separator,
+            matrix_title,
+            separator,
+            matrix_rows[0],
+            "-" * len(matrix_rows[0]),
+            *matrix_rows[1:],
+            separator,
+        ])
+        self.logger.info("\n%s", matrix)
 
         self.logger.info("[STAGE=OFFERS RA=%s APP=%s] Finding valid offer combinations",
                          self.ra_id, job_id)
