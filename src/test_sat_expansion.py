@@ -68,9 +68,12 @@ class ExpansionTests(unittest.TestCase):
             }
         })
         requirement_log = agent.logger.info.call_args.args
-        self.assertIn('SAT requirement', requirement_log[0])
-        self.assertEqual(requirement_log[3:6],
-                         ('audio-class', '(vals["host.cpu"] >= 2)', 3))
+        self.assertEqual(requirement_log[0], '\n%s')
+        self.assertIn('SAT RESOURCE REQUIREMENTS', requirement_log[1])
+        self.assertIn('Microservice', requirement_log[1])
+        self.assertIn('Requested Resources', requirement_log[1])
+        self.assertIn('audio-class', requirement_log[1])
+        self.assertIn('(vals["host.cpu"] >= 2)', requirement_log[1])
 
         agent.logger.reset_mock()
         agent._log_resource_responses('app-1', 'ra-edge', {

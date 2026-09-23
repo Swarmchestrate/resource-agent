@@ -1321,6 +1321,10 @@ class ResourceAgent:
 
     def _log_sat_requirements(self, job_id, requirements):
         """Display each microservice's requested resources and host count."""
+        requirements = requirements or {}
+        if not requirements:
+            return
+        rows = []
         for ms_id, requirement in sorted((requirements or {}).items()):
             requirement = requirement if isinstance(requirement, dict) else {}
             expression = str(requirement.get('expression', 'unspecified')).strip()
@@ -1328,13 +1332,37 @@ class ResourceAgent:
                 expression = expression[len('lambda vals:'):].strip()
             count = requirement.get('count', 1)
             colocated = requirement.get('colocated') or []
-            suffix = f" colocated_with={colocated}" if colocated else ""
-            self.logger.info(
-                "[STAGE=OFFERS RA=%s APP=%s MS=%s] SAT requirement: requested_resources=%s count=%s%s",
-                self.ra_id, job_id, ms_id, expression, count, suffix)
+            colocated_text = ", ".join(map(str, colocated)) if colocated else "-"
+            rows.append((str(ms_id), expression, str(count), colocated_text))
             self.logger.debug(
                 "[STAGE=OFFERS RA=%s APP=%s MS=%s] Full SAT requirement: %s",
                 self.ra_id, job_id, ms_id, requirement)
+
+        headings = ("Microservice", "Requested Resources", "Count", "Colocated With")
+        widths = [
+            max(len(headings[index]), *(len(row[index]) for row in rows))
+            for index in range(len(headings))
+        ]
+
+        def format_row(values):
+            return " | ".join(
+                f"{value:<{widths[index]}}" for index, value in enumerate(values)
+            ).rstrip()
+
+        header = format_row(headings)
+        matrix_rows = [format_row(row) for row in rows]
+        title = f"SAT RESOURCE REQUIREMENTS — APP {job_id}"
+        separator = "=" * max(len(title), len(header), *(len(row) for row in matrix_rows))
+        matrix = "\n".join([
+            separator,
+            title,
+            separator,
+            header,
+            "-" * len(header),
+            *matrix_rows,
+            separator,
+        ])
+        self.logger.info("\n%s", matrix)
 
     def _log_resource_responses(self, job_id, source_ra, responses, requirements=None):
         """State which requested microservices one RA can fulfill."""
