@@ -23,6 +23,7 @@ import threading
 import yaml
 import time
 import requests
+import copy
 from datetime import datetime
 
 from http.client import responses
@@ -52,7 +53,6 @@ from trust_store import TrustStore
 
 # KB
 from kb_client import KBClient
-from sat_expansion import expand_sat_counts
 
 #cap-lib-Done:
 from swch_capreg import SwChCapacityRegistry
@@ -626,7 +626,8 @@ class ResourceAgent:
             return
         selected_ms = self.lead_resource.get(job_id)
         offers = self.job_offers.get(job_id, {}).get(selected_ms, {})
-        lead_ra = next(iter(offers.values()), {}).get('ids', {}).get('ra_id')
+        lead_offer = self._first_offer_instance(next(iter(offers.values()), {}))
+        lead_ra = (lead_offer or {}).get('ids', {}).get('ra_id')
         if selected_ms is not None and not lead_ra:
             complete(job_id, ["Cannot determine the lead RA for cluster deletion"])
             return
@@ -634,8 +635,8 @@ class ResourceAgent:
         targets.update(self.job_responses.get(job_id, {}))
         for offers in self.job_offers.get(job_id, {}).values():
             for offer in offers.values():
-                if isinstance(offer, dict):
-                    ra_id = offer.get('ids', {}).get('ra_id')
+                for instance in self._offer_instances(offer):
+                    ra_id = instance.get('ids', {}).get('ra_id')
                     if ra_id:
                         targets.add(ra_id)
         if lead_ra:
@@ -747,13 +748,9 @@ class ResourceAgent:
 
         self.capreg.dump_capacity_registry_info()
 
-        # The registry reserves every matching capacity for a requirement. Expanding
-        # the SAT before this call would let the first instance reserve them all.
-        with open(ask_yaml) as stream:
-            _, instance_origins = expand_sat_counts(yaml.safe_load(stream))
-        original_path = Path(ask_yaml)
-        with open(original_path.with_name(original_path.stem + '.instances.json'), 'w') as stream:
-            json.dump(instance_origins, stream, indent=2)
+        # Sardou and the capacity registry both understand host.count. Keep the
+        # original SAT intact so the registry can reserve a complete count-aware
+        # offer atomically.
         offers = self.capreg.resource_offer_generate_from_SAT_file(job_id, ask_yaml)
         print(yaml.dump(offers))
     # Ze-comment: by far each RA returns its offer
@@ -1031,11 +1028,8 @@ class ResourceAgent:
 
         # Display response matrix
         
-        resource_names = sorted(all_resource_names)
-        sat_path = f"./KB/tosca_{job_id}.yaml"
-        resource_names = self._get_independent_microservices(sat_path)
-        with open(sat_path) as stream:
-            _, instance_origins = expand_sat_counts(yaml.safe_load(stream))
+        requirements = self.tosca[job_id].get_requirements()
+        resource_names = sorted(requirements)
         print("Response Summary:")
         print("-" * 60)
         
@@ -1057,16 +1051,12 @@ class ResourceAgent:
 
             for resource_name in resource_names:
                 answer = "No"
-                original_name = instance_origins.get(resource_name, resource_name)
-                if original_name in responses:
-                    resource_data = responses[original_name]
+                if resource_name in responses:
+                    resource_data = responses[resource_name]
 
                     # ignore colocated-only entries
                     if not ("colocated" in resource_data and len(resource_data) == 1):
-                        if any(
-                            isinstance(v, dict) and "ids" in v and "characteristics" in v
-                            for v in resource_data.values()
-                        ):
+                        if any(self._offer_instances(v) for v in resource_data.values()):
                             answer = "Yes"
 
                 row += f"{answer}"[:14].ljust(15)
@@ -1081,8 +1071,7 @@ class ResourceAgent:
         with open("ra_responses.json", "w") as f:
             json.dump(ra_responses, f, indent=2)
 
-        valid_combinations = self._find_valid_combinations(
-            ra_responses, resource_names, instance_origins)
+        valid_combinations = self._find_valid_combinations(ra_responses, resource_names)
 
         with open("valid_combinations__.json", "w") as f:
             json.dump(valid_combinations, f, indent=2)
@@ -1212,7 +1201,9 @@ class ResourceAgent:
             target_ra_id = None
             for ms_id, offers in responses.items():
                 if "colocated" not in offers:
-                    first_offer = next(iter(offers.values()))
+                    first_offer = self._first_offer_instance(next(iter(offers.values())))
+                    if not first_offer:
+                        continue
                     target_ra_id = first_offer.get('ids', {}).get('ra_id')
                     break
             
@@ -1224,46 +1215,19 @@ class ResourceAgent:
 
         return transformed
 
-    def _get_independent_microservices(self,file_path):
-        """
-            Ze: 
-                This helper function identifies independent microservices as resources
-        """
-        import ruamel.yaml
-        yaml = ruamel.yaml.YAML(typ='safe')
-        with open(file_path, 'r') as f:
-            data = yaml.load(f)
+    @staticmethod
+    def _offer_instances(offer):
+        """Return the concrete instances in a capacity offer."""
+        if isinstance(offer, dict) and 'ids' in offer:
+            return [offer]
+        if isinstance(offer, list):
+            return [item for item in offer if isinstance(item, dict) and 'ids' in item]
+        return []
 
-        # Expand only for the hub's logical host slots. The capacity registry
-        # always evaluates the original SAT.
-        
-        data, _ = expand_sat_counts(data)
-
-        # 1. Get all nodes that are of type swch:Microservice
-        node_templates = data.get('service_template', {}).get('node_templates', {})
-        all_ms = [
-            name for name, node in node_templates.items()
-            if node.get('type') == 'swch:Microservice'
-        ]
-
-        # 2. Identify services that are colocated (the "followers")
-        policies = data.get('service_template', {}).get('policies', [])
-        colocated_followers = set()
-
-        for policy in policies:
-            for policy_name, policy_details in policy.items():
-                # Look for Colocation policies
-                if policy_details.get('type') == 'swch:Scheduling.Colocation':
-                    targets = policy_details.get('targets', [])
-                    # If targets are [A, B], B is colocated with A.
-                    # We only need a separate resource for A.
-                    if len(targets) > 1:
-                        colocated_followers.update(targets[1:])
-
-        # 3. Filter out the followers from the main list
-        independent_ms = [ms for ms in all_ms if ms not in colocated_followers]
-
-        return sorted(independent_ms)
+    @classmethod
+    def _first_offer_instance(cls, offer):
+        instances = cls._offer_instances(offer)
+        return instances[0] if instances else None
 
     def _get_trust_scores_for_offers(self, job_id, valid_combinations):
         """Resolve offer RA IDs to CAP IDs and fetch each CAP's trust once."""
@@ -1377,50 +1341,32 @@ class ResourceAgent:
         return optimal_index[0]
 
     def _find_valid_combinations(self, offers_dict, resources_list, instance_origins=None):
-        """Assign one distinct reserved offer to each independent host instance."""
-        instance_origins = instance_origins or {}
+        """Select one complete count-aware capacity offer per requirement."""
         candidates = {}
-        for instance in resources_list:
-            original = instance_origins.get(instance, instance)
-            candidates[instance] = []
+        for resource in resources_list:
+            candidates[resource] = []
             for ra_id, ra_offers in offers_dict.items():
-                for offer_id, offer_data in ra_offers.get(original, {}).items():
-                    if offer_id == "colocated" or not isinstance(offer_data, dict):
+                for registry_offer_id, offer in ra_offers.get(resource, {}).items():
+                    instances = self._offer_instances(offer)
+                    if registry_offer_id == "colocated" or not instances:
                         continue
-                    candidates[instance].append((ra_id, offer_id, offer_data))
-            if not candidates[instance]:
+                    allocation = {}
+                    for index, instance in enumerate(instances, 1):
+                        instance = copy.deepcopy(instance)
+                        instance['ids']['registry_offer_id'] = registry_offer_id
+                        instance_id = instance['ids'].get('offer_id', registry_offer_id)
+                        node_name = resource if len(instances) == 1 else f'{resource}-{index}'
+                        allocation[node_name] = {instance_id: instance}
+                    candidates[resource].append(allocation)
+            if not candidates[resource]:
                 return {}
 
         result = {}
-        chosen = {}
-        used = set()
-        last_choice = {}
-
-        def visit(index):
-            if index == len(resources_list):
-                result[f"combination_{len(result) + 1}"] = dict(chosen)
-                return
-            instance = resources_list[index]
-            original = instance_origins.get(instance, instance)
-            for ra_id, offer_id, offer_data in candidates[instance]:
-                identity = (ra_id, offer_id)
-                # Instances of the same requirement are interchangeable. This
-                # order avoids producing every permutation of the same offers.
-                if identity in used or identity <= last_choice.get(original, ("", "")):
-                    continue
-                previous = last_choice.get(original)
-                last_choice[original] = identity
-                used.add(identity)
-                chosen[instance] = {offer_id: offer_data}
-                visit(index + 1)
-                del chosen[instance]
-                used.remove(identity)
-                if previous is None:
-                    del last_choice[original]
-                else:
-                    last_choice[original] = previous
-
-        visit(0)
+        for index, selections in enumerate(product(*(candidates[r] for r in resources_list)), 1):
+            combination = {}
+            for allocation in selections:
+                combination.update(allocation)
+            result[f"combination_{index}"] = combination
         return result
 
 
@@ -1469,7 +1415,8 @@ class ResourceAgent:
             for offer_id, offer_data in offers.items():
                 if offer_data.get('ids', {}).get('ra_id') == self.ra_id:
                     ms_id = offer_data['ids']['ms_id']
-                    selected_by_ms.setdefault(ms_id, set()).add(offer_id)
+                    registry_offer_id = offer_data['ids'].get('registry_offer_id', offer_id)
+                    selected_by_ms.setdefault(ms_id, set()).add(registry_offer_id)
 
         for ms_id, offers in all_offers.items():
             selected_ids = selected_by_ms.get(ms_id, set())
@@ -1700,10 +1647,8 @@ class ResourceAgent:
             # Add logic to update resource status in the registry based on the result of node creation
             # cap-lib-DONE: assigned -> allocated
             
-            offers_all = self.capreg.resource_offer_query_all(job_id)
-            registry_offer = offers_all[original_ms_id][selected_offer_id]
             res_set = self.capreg.resource_set_get_from_offer(
-                selected_offer_id, registry_offer)
+                selected_offer_id, selected_offer_data)
             if res_set is not None:
                 self.capreg.resource_set_deployed(
                     job_id, original_ms_id, res_set["restype"],
@@ -2124,10 +2069,8 @@ class ResourceAgent:
                 )
                 swarmchestrate.add_node(worker_node, dryrun=self.dry_run)
 
-            offers_all = self.capreg.resource_offer_query_all(job_id)
-            registry_offer = offers_all[resource_name][offer_id]
             res_set = self.capreg.resource_set_get_from_offer(
-                offer_id, registry_offer)
+                offer_id, offer_data)
             if res_set is not None:
                 self.capreg.resource_set_deployed(
                     job_id, resource_name, res_set["restype"],

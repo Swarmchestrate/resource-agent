@@ -15,7 +15,8 @@ def load_agent_class():
     names = {'_get_cluster_name', '_clear_job_data', '_handle_delete_job_broadcast',
              '_handle_delete_job_ack', '_start_job_deletion',
              '_handle_job_delete', '_handle_job_delete_all',
-             '_handle_resource_response', '_handle_create_resource_blocking'}
+             '_handle_resource_response', '_handle_create_resource_blocking',
+             '_offer_instances', '_first_offer_instance'}
     cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
                 and node.name in names]
     scope = {'Dict': Dict, 'Any': Any, 'Swarmchestrate': Mock(), 'threading': Mock()}

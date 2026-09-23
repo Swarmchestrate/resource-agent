@@ -32,10 +32,11 @@ def agent_class():
     tree = ast.parse(Path(__file__).with_name('ra_base.py').read_text())
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef)
                and node.name == 'ResourceAgent')
-    names = {'_get_cluster_name', '_process_job_requirements', '_get_independent_microservices',
+    names = {'_get_cluster_name', '_process_job_requirements',
              '_find_valid_combinations', '_get_instance_node_labels',
              '_handle_create_lead_resource', '_handle_create_resource_blocking',
-             '_handle_selected_offer', '_get_trust_scores_for_offers'}
+             '_handle_selected_offer', '_get_trust_scores_for_offers',
+             '_offer_instances', '_first_offer_instance'}
     cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
                 and node.name in names]
     # JSON is a YAML subset; use it to exercise file plumbing without PyYAML.
@@ -43,7 +44,9 @@ def agent_class():
         Path(filename).write_text(json.dumps(data))
     scope = {'expand_sat_counts': expand_sat_counts, 'Path': Path, 'json': json,
              'yaml': types.SimpleNamespace(safe_load=json.load, dump=json.dumps),
-             'write_yaml': write_yaml, 'time': Mock()}
+             'write_yaml': write_yaml, 'time': Mock(),
+             'copy': types.SimpleNamespace(deepcopy=deepcopy),
+             'product': __import__('itertools').product}
     exec(compile(ast.Module(body=[cls], type_ignores=[]), 'ra_base.py', 'exec'), scope)
     return scope['ResourceAgent']
 
@@ -176,7 +179,7 @@ class ExpansionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exceeds 63'):
             expand_sat_counts(source)
 
-    def test_offer_generation_uses_original_sat_and_saves_mapping(self):
+    def test_offer_generation_passes_original_sat_to_count_aware_registry(self):
         agent = agent_class()()
         agent.logger = Mock()
         agent.ra_id = 'ra'
@@ -192,45 +195,43 @@ class ExpansionTests(unittest.TestCase):
             agent._process_job_requirements('job', 'client', str(path), 'hub')
             agent.capreg.resource_offer_generate_from_SAT_file.assert_called_once_with('job', str(path))
             self.assertEqual(path.read_text(), original)
-            self.assertEqual(json.loads(path.with_name('sat.instances.json').read_text())['details-3'], 'details')
+            self.assertFalse(path.with_name('sat.instances.json').exists())
             self.assertEqual(agent.peer.send.call_args.args[2]['cap_id'], 'cap-ra')
 
-    def test_combinations_require_every_expanded_independent_instance(self):
+    def test_aggregate_capacity_offer_expands_to_named_node_instances(self):
         agent = agent_class()()
-        yaml_module = types.ModuleType('ruamel.yaml')
-        yaml_module.YAML = lambda **kwargs: types.SimpleNamespace(load=json.load)
-        ruamel = types.ModuleType('ruamel')
-        ruamel.yaml = yaml_module
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-                sys.modules, {'ruamel': ruamel, 'ruamel.yaml': yaml_module}):
-            path = Path(directory) / 'sat.yaml'
-            path.write_text(json.dumps(example()))
-            resources = agent._get_independent_microservices(str(path))
-        self.assertEqual(resources, ['details-1', 'details-2', 'details-3', 'ratings'])
-        origins = {name: name.split('-')[0] for name in resources}
+        resources = ['details', 'ratings']
         offers = {'ra': {
-            'details': {f'offer-{i}': {'ids': {'ms_id': 'details', 'ra_id': 'ra'}}
-                        for i in range(1, 4)},
+            'details': {'details-set': [
+                {'ids': {'offer_id': f'offer-{i}', 'ms_id': 'details', 'ra_id': 'ra'}}
+                for i in range(1, 4)]},
             'ratings': {'offer-ratings': {'ids': {'ms_id': 'ratings', 'ra_id': 'ra'}}}}}
-        combinations = agent._find_valid_combinations(offers, resources, origins)
-        self.assertEqual(set(combinations['combination_1']), set(resources))
+        combinations = agent._find_valid_combinations(offers, resources)
+        self.assertEqual(set(combinations['combination_1']),
+                         {'details-1', 'details-2', 'details-3', 'ratings'})
         self.assertEqual(len(combinations), 1)
-        del offers['ra']['details']['offer-3']
-        self.assertEqual(agent._find_valid_combinations(offers, resources, origins), {})
+        for slot in ('details-1', 'details-2', 'details-3'):
+            data = next(iter(combinations['combination_1'][slot].values()))
+            self.assertEqual(data['ids']['registry_offer_id'], 'details-set')
+            self.assertEqual(data['ids']['ms_id'], 'details')
+        del offers['ra']['details']
+        self.assertEqual(agent._find_valid_combinations(offers, resources), {})
 
-    def test_count_can_span_ras_without_reusing_an_offer(self):
+    def test_aggregate_offer_is_an_atomic_candidate(self):
         agent = agent_class()()
         offers = {
-            'ra-a': {'details': {'a': {'ids': {'ms_id': 'details', 'ra_id': 'ra-a'}}}},
-            'ra-b': {'details': {
-                'b': {'ids': {'ms_id': 'details', 'ra_id': 'ra-b'}},
-                'c': {'ids': {'ms_id': 'details', 'ra_id': 'ra-b'}}}}}
-        slots = ['details-1', 'details-2', 'details-3']
-        origins = {slot: 'details' for slot in slots}
-        combinations = agent._find_valid_combinations(offers, slots, origins)
-        self.assertEqual(len(combinations), 1)
-        self.assertEqual({next(iter(item)) for item in combinations['combination_1'].values()},
-                         {'a', 'b', 'c'})
+            'ra-a': {'details': {'set-a': [
+                {'ids': {'offer_id': f'a-{i}', 'ms_id': 'details', 'ra_id': 'ra-a'}}
+                for i in range(3)]}},
+            'ra-b': {'details': {'set-b': [
+                {'ids': {'offer_id': f'b-{i}', 'ms_id': 'details', 'ra_id': 'ra-b'}}
+                for i in range(3)]}}}
+        combinations = agent._find_valid_combinations(offers, ['details'])
+        self.assertEqual(len(combinations), 2)
+        for combination in combinations.values():
+            self.assertEqual(len(combination), 3)
+            self.assertEqual(len({next(iter(v.values()))['ids']['ra_id']
+                                  for v in combination.values()}), 1)
 
     def test_trust_lookup_uses_cap_id_and_queries_shared_cap_once(self):
         agent = agent_class()()
@@ -257,16 +258,19 @@ class ExpansionTests(unittest.TestCase):
         agent.deleted_jobs = set()
         agent.pending_deletions = {}
         agent.capreg = Mock()
-        registry = {'details': {'a': {'ids': {'ms_id': 'details'}},
-                                'b': {'ids': {'ms_id': 'details'}},
-                                'c': {'ids': {'ms_id': 'details'}}}}
+        aggregate = [{'ids': {'offer_id': key, 'ms_id': 'details'}}
+                     for key in ('a', 'b')]
+        registry = {'details': {'details-set': aggregate,
+                                'unused': {'ids': {'ms_id': 'details'}}}}
         agent.capreg.resource_offer_query_all.return_value = registry
-        selected = {'details-1': {'a': {'ids': {'ms_id': 'details', 'ra_id': 'ra-a'}}},
-                    'details-2': {'c': {'ids': {'ms_id': 'details', 'ra_id': 'ra-a'}}}}
+        selected = {'details-1': {'a': {'ids': {'ms_id': 'details', 'ra_id': 'ra-a',
+                                                 'registry_offer_id': 'details-set'}}},
+                    'details-2': {'b': {'ids': {'ms_id': 'details', 'ra_id': 'ra-a',
+                                                 'registry_offer_id': 'details-set'}}}}
         agent._handle_selected_offer('hub', {'job_id': 'job', 'offer_info': selected})
-        self.assertEqual([call.args[0] for call in agent.capreg.resource_offer_accept.call_args_list],
-                         ['a', 'c'])
-        agent.capreg.resource_offer_reject.assert_called_once_with('b', registry['details']['b'])
+        agent.capreg.resource_offer_accept.assert_called_once_with('details-set', aggregate)
+        agent.capreg.resource_offer_reject.assert_called_once_with(
+            'unused', registry['details']['unused'])
 
     def test_worker_uses_unique_node_name_and_deploys_exact_offer(self):
         agent = agent_class()()
@@ -304,9 +308,9 @@ class ExpansionTests(unittest.TestCase):
                          ['details-1', 'details-2'])
         self.assertEqual([config['node_labels'] for config in configs],
                          [['labels.swarmchestrate.eu/ms_id=details']] * 2)
-        self.assertEqual([call.args[1] for call in
+        self.assertEqual([call.args[1]['ids']['offer_id'] for call in
                           agent.capreg.resource_set_get_from_offer.call_args_list],
-                         [registry['details']['a'], registry['details']['b']])
+                         ['a', 'b'])
         self.assertEqual([call.args[3] for call in
                           agent.capreg.resource_set_deployed.call_args_list], ['a', 'b'])
 
