@@ -63,6 +63,24 @@ from swch_capreg import SwChCapacityRegistry
 
 
 
+class StageLogFormatter(logging.Formatter):
+    """Abbreviate capability and application IDs in stage log headers."""
+
+    def formatMessage(self, record):
+        display_record = copy.copy(record)
+        header, separator, body = record.message.partition("]")
+        if header.startswith("[STAGE=") and separator:
+            def shorten(match):
+                kind, identifier = match.groups()
+                prefix = "CAP" if kind == "CAP" else "app"
+                suffix = identifier.replace("-", "")[-4:]
+                return f"{prefix}-xxx-{suffix}"
+
+            header = re.sub(r"\b(CAP|APP)=([^\s\]]+)", shorten, header)
+            display_record.message = header + separator + body
+        return super().formatMessage(display_record)
+
+
 class ResourceAgent:
     """Resource Agent for evaluating and responding to resource requests"""
 
@@ -106,7 +124,7 @@ class ResourceAgent:
         self.capacity_dump_enabled = self._setting_enabled(
             "RA_CAPACITY_DUMP", self.config.get("capacity_dump", False))
         self._setup_logging()
-        self.logger.info("[STAGE=INIT RA=%s] Initialisation started; CAP=%s",
+        self.logger.info("[STAGE=INIT RA=%s CAP=%s] Initialisation started",
                          self.ra_id, self.ra_cap_id or "unset")
         self.logger.debug("[STAGE=INIT RA=%s] Dry-run mode: %s",
                           self.ra_id, self.dry_run)
@@ -288,6 +306,9 @@ class ResourceAgent:
             force=True,
         )
         self.logger = logging.getLogger(f"RA-{self.ra_id}")
+        for handler in logging.getLogger().handlers:
+            handler.setFormatter(StageLogFormatter(
+                '%(asctime)s %(levelname)-7s %(message)s'))
         self.logger.setLevel(level)
 
     @staticmethod
