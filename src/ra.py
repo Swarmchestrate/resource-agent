@@ -23,19 +23,18 @@ def signal_handler(signum, frame):
     sys.exit(0)
 
 def display_ra(ra):
-     # Display configuration
-    print("=" * 60)
-    print("The RA {", ra.ra_id,"} Starting...")
-    print("=" * 60)
+    """Log startup configuration using the same stream as stage messages."""
     status = ra.get_status()
-    print(f"RA ID: {status['ra_id']}")
-    print(f"Universe ID: {status['universe_id']}")
-    print(f"Provider: {status['provider']}")
-    print(f"P2P Port: {status['p2p_port']}")
-    print(f"API Port: {status['api_port']}")
-    print(f"Bootstrap Peers: {status['bootstrap_peers']}")
-    print(f"Capacity Loaded: {status['capacity_loaded']}")
-    print("-" * 60)
+    ra.logger.info(
+        "\n%s\nThe RA { %s } Starting...\n%s\n"
+        "RA ID: %s\nUniverse ID: %s\nProvider: %s\n"
+        "P2P Port: %s\nAPI Port: %s\nBootstrap Peers: %s\n"
+        "Capacity Loaded: %s\n%s",
+        "=" * 60, ra.ra_id, "=" * 60,
+        status['ra_id'], status['universe_id'], status['provider'],
+        status['p2p_port'], status['api_port'], status['bootstrap_peers'],
+        status['capacity_loaded'], "-" * 60,
+    )
 
 def main(config_file, capacity_file):
     global ra

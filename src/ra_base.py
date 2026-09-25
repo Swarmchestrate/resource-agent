@@ -829,8 +829,6 @@ class ResourceAgent:
             self.logger.warning("No capacity data available for evaluation")
             return
 
-        self._maybe_dump_capacity("before offer generation", job_id)
-
         # Sardou and the capacity registry both understand host.count. Keep the
         # original SAT intact so the registry can reserve a complete count-aware
         # offer atomically.
@@ -1728,7 +1726,6 @@ class ResourceAgent:
         
 #        print(f"[DEBUG]all_offers in capacity registry for job {job_id} is {all_offers}")
 
-        self._maybe_dump_capacity("before selection update", job_id)
         # Ze-TODO: this may be wrong
         # # for all resources
         # for ms_id in all_offers.keys():
