@@ -1,3 +1,6 @@
+.agents
+.codebase-memory
+skills-lock.json
 # Python
 __pycache__/
 *.py[cod]
