@@ -48,6 +48,7 @@ from utility import validate_microservice_names
 from utility import extract_qos_priorities as get_qos_priorities
 from utility import generate_tosca_configmap as write_tosca_configmap
 from utility import generate_swarm_configmap as write_swarm_configmap
+from utility import generate_simdata_configmap as write_simdata_configmap
 #from utility import get_resource_capacity as get_resource_capacity
 
 from trust_store import TrustStore
@@ -1998,9 +1999,10 @@ class ResourceAgent:
             # Ze: we have three folders to create here: KB/, k3s/, k3s-{job_id}/
             #     1) KB/ acts as knowledge base and stores the tosca file
             #     2) k3s/ stores default manifests for deploying SA and other, i.e., namespace, daemonset, rbac, k3s-dashboard
-            #     3) k3s-{job_id}/ stores all manifests for deploying SA for this job, it copies from k3s/ and adds two configmaps: tosca configmap and SA configmap
+            #     3) k3s-{job_id}/ stores all manifests for deploying SA for this job, it copies from k3s/ and adds three configmaps
             #        a) tosca configmap: contains the tosca file for this job
             #        b) SA configmap: contains the SA configuration info
+            #        c) simdata configmap: contains simulated metrics for SA replay
 
             folder_path = f"KB"
             import os
@@ -2045,6 +2047,14 @@ class ResourceAgent:
             configMap_config_path = f"output/cluster_{cluster_name}/k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
             # The ra_ip should be the ip of one of the RAs, don't be confused with master_ip which is the LR ip.
             write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.hub_ra_ip+"")
+            metrics_path = (
+                Path(__file__).resolve().parent.parent
+                / "simulated_data" / "simulated_nodes_metrics.json"
+            )
+            write_simdata_configmap(
+                metrics_path,
+                output_file=Path(folder_path) / "05-configmap-swarm-agent-simdata.yaml",
+            )
            
 
             # Ze:DONE: translate tosca -> k3s manifest, this should be done in SA, but it requires puccini installation

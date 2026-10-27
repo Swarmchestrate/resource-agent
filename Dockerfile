@@ -55,6 +55,7 @@ RUN arch="$(dpkg --print-architecture)" \
 # Copy application source
 COPY src/ ./src/
 COPY k3s/ ./k3s
+COPY simulated_data/ ./simulated_data/
 
 # Create directories used at runtime
 RUN mkdir -p KB

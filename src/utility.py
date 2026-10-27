@@ -1,6 +1,7 @@
 # utility.py
 import yaml
 import re
+import json
 from pathlib import Path
 
 """
@@ -102,6 +103,23 @@ def extract_qos_priorities(qos_data):
             qos_priority[normalized_key] = priority
 
     return qos_priority
+
+def generate_simdata_configmap(
+    metrics_path,
+    output_file="swarm-simdata-configmap.yaml",
+):
+    """Package validated simulated metrics at the DaemonSet's metrics.json key."""
+    content = Path(metrics_path).read_text(encoding="utf-8")
+    json.loads(content)
+    manifest = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": "swarm-agent-simdata", "namespace": "swarm-system"},
+        "data": {"metrics.json": content},
+    }
+    with open(output_file, "w", encoding="utf-8") as stream:
+        yaml.safe_dump(manifest, stream, sort_keys=False)
+
 
 def generate_tosca_configmap(
     tosca_path: str,
