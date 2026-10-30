@@ -606,7 +606,7 @@ class ResourceAgent:
         try:
             if self.bootstrap_peers:
                 raise ValueError("APP submissions must be sent to a hub RA")
-            validate_microservice_names(ask_yaml)
+            #validate_microservice_names(ask_yaml)
             write_yaml(ask_yaml, 'tosca.yaml')
             # 1) (done) validate and parse
             self.tosca[job_id] = Sardou('tosca.yaml') #(to validate, may fail if invalid)
