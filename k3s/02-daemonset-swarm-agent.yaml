@@ -39,6 +39,8 @@ spec:
         # metric values log at DEBUG; set to DEBUG to see them
         - name: SA_LOG_LEVEL
           value: "INFO"
+        - name: SA_USE_EMS
+          value: "false"
         volumeMounts:
         - name: config
           mountPath: /config
