@@ -40,7 +40,7 @@ spec:
         - name: SA_LOG_LEVEL
           value: "INFO"
         - name: SA_USE_EMS
-          value: "false"
+          value: "true"
         volumeMounts:
         - name: config
           mountPath: /config
