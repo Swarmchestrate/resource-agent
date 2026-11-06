@@ -379,6 +379,31 @@ class SwarmchestrateClient:
             return False
     
     
+    def _handle_submit_response(self, peer_id: str, message: dict[str, Any]):
+        """Remain connected after acceptance; stop on the terminal deployment result."""
+        if self.job_complete:
+            return
+        result = message.get('result')
+        job_id = message.get('job_id')
+        self.swarm_id = message.get('swarm_id') or job_id or getattr(self, 'swarm_id', None)
+        detail = message.get('message', '')
+        if result == 'accepted' or message.get('final') is False:
+            self.logger.info("Application %s accepted; waiting for deployment: %s", job_id, detail)
+            print(f"Application {self.swarm_id} accepted; waiting for deployment.")
+            return
+        if result not in ('success', 'failure'):
+            self.logger.warning("Unexpected submission response from %s: %s", peer_id, message)
+            return
+        self.submission_result = message
+        self.job_complete = True
+        if result == 'failure':
+            self.logger.error("Application %s failed: %s", job_id, detail)
+            print(f"[ERROR] Application {self.swarm_id} failed: {detail}")
+        else:
+            self.logger.info("Application %s deployment succeeded: %s", job_id, detail)
+            print(f"Application {self.swarm_id} deployment succeeded: {detail}")
+        self.stop_client()
+
     def submit_job(self, tosca_path, hub_host="", hub_port=5000, gw_RA_id=""):
         """Submit job to RA network via hub"""
         ask_data = self.load_tosca(tosca_path)
@@ -399,32 +424,9 @@ class SwarmchestrateClient:
         )
  
         # Register response handler
-        def _handle_submit_response(peer_id: str, message: dict[str, Any]):
-            print("[DEBUG] MSG_SUBMIT_RESPONSE received")
-            print("[DEBUG] peer_id:", peer_id)
-            print("[DEBUG] message:", message)
-
-            self.logger.info(f"Received job submit response from {peer_id}")
-
-            job_id = message.get("job_id")
-            result = message.get("result")
-
-            if result == "failure":
-                reason = message.get("message", "Unknown submission error")
-                print(f"[ERROR] Job submission failed: {reason}")
-                self.logger.error(f"Job submission failed: {reason}")
-                self.stop_client()
-                return
-
-            self.swarm_id = message.get("swarm_id") or job_id
-            print(f"[DEBUG] Job {job_id} submission succeeded")
-            self.logger.info(f"Job {job_id} submission succeeded")
-            self.stop_client()
-            #self.peer.leave()
-            #if reactor.running:
-            #    reactor.callLater(0.5, reactor.stop)
-
-        self.peer.register_message_handler("MSG_SUBMIT_RESPONSE", _handle_submit_response)
+        self.job_complete = False
+        self.submission_result = None
+        self.peer.register_message_handler("MSG_SUBMIT_RESPONSE", self._handle_submit_response)
         #self.peer.register_message_handler("MSG_SWARM_ID_RESPONSE", self._handle_swarm_id_response)
 
         def _handle_swarm_id_response(peer_id: str, message: dict[str, Any]):

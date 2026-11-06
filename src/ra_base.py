@@ -93,6 +93,9 @@ class ResourceAgent:
         self.config = self._load_config(config_file)
         self.dry_run = self.config.get('dry_run', False)
 
+        self.deployment_lock = threading.RLock()
+        self.pending_deployments = {}
+        self.sa_deployment_contexts = {}
         self.deletion_lock = threading.RLock()
         self.pending_deletions = {}
         self.deleted_jobs = set()
@@ -400,14 +403,25 @@ class ResourceAgent:
         self.peer.register_message_handler("MSG_RESOURCE_RESPONSE", self._handle_resource_response)
         self.peer.register_message_handler("MSG_SELECTED_OFFER", self._handle_selected_offer)
         self.peer.register_message_handler("MSG_CREATE_RESOURCE", self._handle_create_resource)
-        self.peer.register_message_handler("MSG_CREATE_LEAD_RESOURCE", self._handle_create_lead_resource)
+        self.peer.register_message_handler("MSG_CREATE_LEAD_RESOURCE", self._handle_create_lead_resource_request)
         self.peer.register_message_handler("MSG_DELETE_JOB_BROADCAST", self._handle_delete_job_broadcast)
         self.peer.register_message_handler("MSG_DELETE_JOB_ACK", self._handle_delete_job_ack)
+        self.peer.register_message_handler("MSG_MASTER_FAILED", self._handle_master_failed)
+        self.peer.register_message_handler("MSG_RESOURCE_CREATED", self._handle_resource_created)
+        self.peer.register_message_handler("MSG_DEPLOY_SA", self._handle_deploy_sa)
+        self.peer.register_message_handler("MSG_SA_DEPLOYED", self._handle_sa_deployed)
         #self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info)
         self.peer.register_message_handler("MSG_MASTER_INFO", self._handle_master_info_cb)
 
 
     def _clear_job_data(self, job_id):
+        # Cancel deployment tracking and discard retained SSH/deployment context.
+        if hasattr(self, 'deployment_lock'):
+            with self.deployment_lock:
+                pending = self.pending_deployments.pop(job_id, None)
+                if pending and pending.get('timer'):
+                    pending['timer'].cancel()
+                self.sa_deployment_contexts.pop(job_id, None)
         for data in (self.job_states, self.job_responses, self.master_info,
                      self.job_clients, self.job_offers, self.lead_resource,
                      self.job_capreg_allocated, self.job_tosca, self.tosca):
@@ -934,14 +948,15 @@ class ResourceAgent:
             self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Submission accepted; client=%s",
                               self.ra_id, job_id, client_id)
             if client_id:
-                self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Sending success response to client=%s",
+                self.logger.debug("[STAGE=OFFERS RA=%s APP=%s] Sending acceptance response to client=%s",
                                   self.ra_id, job_id, client_id)
                 submit_response_message = {
                         "job_id": job_id,
                         "swarm_id": job_id,
                         "ra_id": self.ra_id,
-                        "result": "success",
-                        "message": "Resource offers compiled successfully"
+                        "result": "accepted",
+                        "final": False,
+                        "message": "Resource offers compiled; waiting for resource creation and SA deployment"
                         }
                 self.peer.send(client_id, "MSG_SUBMIT_RESPONSE", submit_response_message)
 
@@ -1100,7 +1115,13 @@ class ResourceAgent:
                 "offer_info": self.job_offers[job_id]
         }
         
-        self.peer.send(LR_id, "MSG_CREATE_LEAD_RESOURCE", msg_lead_resource_request_ra)
+        self._track_master_creation(job_id, LR_id)
+        try:
+            self.peer.send(LR_id, "MSG_CREATE_LEAD_RESOURCE", msg_lead_resource_request_ra)
+        except Exception as exc:
+            with self.deployment_lock:
+                self._fail_deployment(job_id, f'Cannot request master creation: {exc}')
+            return
         self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Lead-node request sent to RA=%s",
                          self.ra_id, job_id, selected_ms, LR_id)
         self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s] Selected node entries: %s",
@@ -1815,6 +1836,7 @@ class ResourceAgent:
         original_ms_id = selected_offer_data['ids']['ms_id']
         lead_resource_offer = {original_ms_id: selected_offer}
 
+        # Ze: Auto_approve is a flag to indicate whether we want to approve the deployment automatically or let user to manually approve it.
         if _os.getenv("AUTO_APPROVE", "false") == "true":
             self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s] AUTO_APPROVE enabled",
                               self.ra_id, job_id)
@@ -1842,7 +1864,9 @@ class ResourceAgent:
 
             # Generate the RDT based on the resource offer info
             rdt = cdt.generate_rdt(lead_resource_offer)
+
             self.logger.debug(f"rdt is {rdt} \n")
+
             # Get the cluster info
             cluster_info = Sardou(content=rdt).get_cluster()
             self.logger.debug(f"cluster_info is {cluster_info} \n")
@@ -1990,148 +2014,19 @@ class ResourceAgent:
                     job_id, original_ms_id, res_set["restype"],
                     res_set["resid"], res_set["count"])
             self._maybe_dump_capacity("lead node allocated", job_id)
-
-
-
-
             
-            # Ze-done: Prepare configmap of tosca file for SA
-            # Ze: we have three folders to create here: KB/, k3s/, k3s-{job_id}/
-            #     1) KB/ acts as knowledge base and stores the tosca file
-            #     2) k3s/ stores default manifests for deploying SA and other, i.e., namespace, daemonset, rbac, k3s-dashboard
-            #     3) k3s-{job_id}/ stores all manifests for deploying SA for this job, it copies from k3s/ and adds three configmaps
-            #        a) tosca configmap: contains the tosca file for this job
-            #        b) SA configmap: contains the SA configuration info
-            #        c) simdata configmap: contains simulated metrics for SA replay
+            # Retain credentials locally; the hub triggers deployment after workers finish.
+            with self.deployment_lock:
+                self.sa_deployment_contexts[job_id] = {
+                    'hub_ra': message.get('hub_ra', peer_id),
+                    'status': 'waiting',
+                    'tosca': tosca, 'offer_info': offer_info,
+                    'lead_resource_name': lead_resource_name,
+                    'cluster_name': cluster_name, 'master_ip': master_ip,
+                    'ssh_user': ssh_user, 'ssh_key_path': ssh_key_path,
+                    'ssh_port': ssh_port,
+                }
 
-            folder_path = f"KB"
-            import os
-            #import shutil
-
-
-            _os.makedirs(folder_path, exist_ok=True)  # ✅ Creates folder if it doesn't exist
-            write_yaml(tosca, f"KB/{job_id}_tosca.yaml")
-
-                        # Ze-TODO: output directory
-            # a test
-            #output_dir = f"output/cluster_{cluster_name}/k3s-{job_id}"
-            #_os.makedirs(output_dir, exist_ok=True)  # ✅ Creates folder if it doesn't exist
-            folder_path = f"output/cluster_{cluster_name}/k3s-{job_id}"
-            _os.makedirs(folder_path, exist_ok=True)  # ✅ Creates folder if it doesn't exist
-            src_folder = "k3s"
-
-            # ✅ Copy all files from k3s/ into output/cluster_{cluster_name}/k3s-{job_id}/
-            if _os.path.exists(src_folder):
-                for item in _os.listdir(src_folder):
-                    src_path = _os.path.join(src_folder, item)
-                    dest_path = _os.path.join(folder_path, item)
-                    if _os.path.isdir(src_path):
-                        _shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
-                    else:
-                        _shutil.copy2(src_path, dest_path)
-            else:
-                self.logger.warning("[STAGE=DEPLOYMENT RA=%s APP=%s] Source folder does not exist: %s",
-                                    self.ra_id, job_id, src_folder)
-            
-            # prepare configmap of tosca file for SA
-            configMap_tosca_path = f"output/cluster_{cluster_name}/k3s-{job_id}/03-configmap-swarm-agent-tosca.yaml"
-            write_tosca_configmap(f"KB/{job_id}_tosca.yaml", output_file=configMap_tosca_path)
-            
-            # Ze-done: Prepare configmap of SA configuration
-            # input: job_id, resource names
-            # Ze-done: input should include hub RA's ip. without it, SA cannot join in p2p network.
-            resource_input = {
-                "LEADER": lead_resource_name,
-                "Worker": [res for res in offer_info if res != lead_resource_name]
-            }
-            configMap_config_path = f"output/cluster_{cluster_name}/k3s-{job_id}/04-configmap-swarm-agent-config.yaml"
-            # The ra_ip should be the ip of one of the RAs, don't be confused with master_ip which is the LR ip.
-            write_swarm_configmap(resource_input, application_id=job_id, output_file=configMap_config_path,ra_ip=""+self.hub_ra_ip+"")
-            metrics_path = (
-                Path(__file__).resolve().parent.parent
-                / "simulated_data" / "simulated_nodes_metrics.json"
-            )
-            write_simdata_configmap(
-                metrics_path,
-                output_file=Path(folder_path) / "05-configmap-swarm-agent-simdata.yaml",
-            )
-           
-
-            # Ze:DONE: translate tosca -> k3s manifest, this should be done in SA, but it requires puccini installation
-            #self.logger.info("Converting Tosca into k3s manifests.")
-            #tpl = parse_tosca(self.tosca_path)
-
-            # from ruamel.yaml import YAML
-            # from sardou.manifestGenerator import get_kubernetes_manifest
-            
-            # yaml_parser = YAML()
-            # yaml_parser.default_flow_style = False
-
-            # TOSCA_FILE = f"KB/{job_id}_tosca.yaml"
-            # OUTPUT_FILE = f"k3s-{job_id}/application-manifest.yaml"
-            # IMAGE_PULL_SECRET = "regcred"
-
-            # path = Path(TOSCA_FILE)
-            # if not path.exists():
-            #     sys.exit(f"Error: TOSCA file '{TOSCA_FILE}' not found.")
-
-            # try:
-            #     manifests = get_kubernetes_manifest(TOSCA_FILE, image_pull_secret=IMAGE_PULL_SECRET)
-
-            #     if not manifests:
-            #         sys.exit("Warning: No Kubernetes manifests generated.")
-            #     with open(OUTPUT_FILE, "w") as f:
-            #         yaml_parser.dump_all(manifests, f)
-            # except Exception as e:
-            #     sys.exit(f"Error: {e}")
-
-            # print(f"✅ Kubernetes manifests written to '{OUTPUT_FILE}' ({len(manifests)} items)\n")
-            self.logger.debug(f"right before creating registry secret on LR, port is {ssh_port}\n")
-            # Ze-DONE: Create registry secret on the LR using cluster-builder library
-            # Ze-DONE
-            registry_config = {
-               "master_ip": master_ip,
-               "ssh_user": ssh_user,
-               "ssh_private_key_path": ssh_key_path,
-               "ssh_port": ssh_port,
-               "secret_names": ["regcred"] #optional
-               #"namespace":"test" , #optional
-            }
-            if self.dry_run:
-                self.logger.debug("[STAGE=DEPLOYMENT APP=%s] Dry run: registry secret creation skipped", job_id)
-            else:
-                # Run the registry secret creation
-                swarmchestrate = Swarmchestrate(template_dir="templates", output_dir="output")
-                swarmchestrate.create_registry_secrets(registry_config)
-
-            # Ze-TODO: until here were commented
-            # Use absolute path to ensure OpenTofu can find it from any directory
-            absolute_path = os.path.abspath(f"output/cluster_{cluster_name}/k3s-{job_id}")
-            self.logger.debug(f"ssh_port before applying manifests is {ssh_port}\n")
-            # copy the manifests from k3s-{job_id}/ to the LR
-            manifest_cfg = (
-                f'{{"manifest_folder": "{absolute_path}",'
-#                f'{{"manifest_folder": "/home/ubuntu/e2e-demo/k3s-{job_id}",'
-
-                f'"master_ip": "{master_ip}",'
-                f'"ssh_key_path": "{ssh_key_path}",'
-                f'"ssh_port": "{ssh_port}",'
-                f'"ssh_user": "{ssh_user}"}}'
-            )
-            cfg = json.loads(manifest_cfg)
-            manifest_folder = Path(cfg["manifest_folder"])
-            manifest_folder.exists() or exit(f"❌ Manifest folder does not exist: {manifest_folder}")
-            # Run cluster-builder copy-manifest
-            if self.dry_run:
-                self.logger.debug("[STAGE=DEPLOYMENT APP=%s] Dry run: manifest deployment skipped", job_id)
-            else:
-                Swarmchestrate(template_dir="templates", output_dir="output").deploy_manifests(
-                manifest_folder=str(manifest_folder),
-                master_ip=cfg["master_ip"],
-                ssh_key_path=cfg["ssh_key_path"],
-                ssh_port=cfg["ssh_port"],
-                ssh_user=cfg["ssh_user"]
-                )
             # Ze-DONE: master_ip will always be a public ip
             # for the edge case, if edge_device_local_ip is present, this means its public ip does not support ports
             # to form a k3s cluster, we need to use the local ip
@@ -2157,77 +2052,236 @@ class ResourceAgent:
             self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Lead node created; cluster=%s",
                              self.ra_id, job_id, node_name, cluster_name)
  
+    def _deploy_sa(self, job_id, context):
+        """Prepare SA manifests locally, then deploy them to the master node."""
+        cluster_name = context['cluster_name']
+        kb_path = Path('KB') / f'{job_id}_tosca.yaml'
+        kb_path.parent.mkdir(parents=True, exist_ok=True)
+        write_yaml(context['tosca'], str(kb_path))
+        folder = Path('output') / f'cluster_{cluster_name}' / f'k3s-{job_id}'
+        folder.mkdir(parents=True, exist_ok=True)
+        source = Path('k3s')
+        if not source.is_dir():
+            raise FileNotFoundError(f'SA manifest directory does not exist: {source}')
+        _shutil.copytree(source, folder, dirs_exist_ok=True)
+        write_tosca_configmap(str(kb_path), output_file=str(folder / '03-configmap-swarm-agent-tosca.yaml'))
+        lead = context['lead_resource_name']
+        resource_input = {
+            'LEADER': lead,
+            'Worker': [node for node in context['offer_info'] if node != lead],
+        }
+        write_swarm_configmap(
+            resource_input, application_id=job_id, ra_ip=str(self.hub_ra_ip),
+            output_file=str(folder / '04-configmap-swarm-agent-config.yaml'))
+        metrics_path = (Path(__file__).resolve().parent.parent
+                        / 'simulated_data' / 'simulated_nodes_metrics.json')
+        write_simdata_configmap(
+            metrics_path, output_file=folder / '05-configmap-swarm-agent-simdata.yaml')
+        if self.dry_run:
+            self.logger.info("APP %s: dry run; SA files prepared, deployment skipped", job_id)
+            return
+        builder = Swarmchestrate(template_dir='templates', output_dir='output')
+        builder.create_registry_secrets({
+            'master_ip': context['master_ip'], 'ssh_user': context['ssh_user'],
+            'ssh_private_key_path': context['ssh_key_path'],
+            'ssh_port': context['ssh_port'], 'secret_names': ['regcred'],
+        })
+        builder.deploy_manifests(
+            manifest_folder=str(folder.resolve()), master_ip=context['master_ip'],
+            ssh_key_path=context['ssh_key_path'], ssh_port=context['ssh_port'],
+            ssh_user=context['ssh_user'])
+
     async def _handle_master_info(self, peer_id, message):
-        """Process master info from lead resource"""
-        import asyncio
-        job_id = message.get("job_id")
-        self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s] Lead node ready; dispatching workers",
-                         self.ra_id, job_id)
-        master_info = message.get("master_info", {})
+        """Dispatch workers and wait for completion responses before deploying SA."""
+        job_id = message.get('job_id')
+        with self.deployment_lock:
+            if (job_id in self.deleted_jobs or job_id in self.pending_deletions
+                    or (job_id in self.pending_deployments
+                        and self.pending_deployments[job_id]['phase'] != 'master')):
+                return
+            offers = self.job_offers[job_id]
+            lead = self.lead_resource[job_id]
+            lead_ra = next(iter(offers[lead].values()))['ids']['ra_id']
+            if peer_id != lead_ra:
+                self.logger.warning("APP %s: master info from unexpected RA %s", job_id, peer_id)
+                return
+            previous = self.pending_deployments.get(job_id)
+            if previous:
+                previous['timer'].cancel()
+            expected = {node: next(iter(offer.values()))['ids']['ra_id']
+                        for node, offer in offers.items() if node != lead}
+            pending = {'expected': expected, 'remaining': set(expected),
+                       'lead_ra': lead_ra, 'phase': 'workers'}
+            self.pending_deployments[job_id] = pending
+            self.job_states.setdefault(job_id, {})['state'] = 'Initialising'
 
-        k3s_token = master_info["k3s_token"]
-        cluster_name = master_info["cluster_name"]
-        master_ip = master_info["master_ip"]
+            def expire():
+                with self.deployment_lock:
+                    if (self.pending_deployments.get(job_id) is pending
+                            and pending['phase'] in ('workers', 'sa')):
+                        self._fail_deployment(job_id, 'Timed out waiting for ' +
+                                              (str(sorted(pending['remaining']))
+                                               if pending['phase'] == 'workers' else 'SA deployment'))
 
-        # decrement lead resource offer count while we fan out worker creates
-        # [Ze-DEBUG]
-        # self.job_offers[job_id][self.lead_resource[job_id]]["count"] -= 1
-        offer_info = self.job_offers[job_id]
+            timer = threading.Timer(self.config.get('deployment_timeout_seconds', 1800), expire)
+            timer.daemon = True
+            pending['timer'] = timer
+            timer.start()
 
-        tasks = []
-        for res, res_info in offer_info.items():
-            # [Ze-DEBUG]
-                # 1. Get the dictionary containing the actual data (ids/characteristics)
-            # This skips over the long "ra-aws-edge-uk_job_..." key
-            offer_data = next(iter(res_info.values()))
-            
-            # 2. Reach into the "ids" block to get the ra_id
-            ra_id = offer_data["ids"]["ra_id"]
-            self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Assigned worker RA=%s",
-                              self.ra_id, job_id, res, ra_id)
-
-            if res == self.lead_resource[job_id]:
-                self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Lead node excluded from worker dispatch",
-                                  self.ra_id, job_id, res)
-                continue
-
-            msg_create_resource = {
-                "job_id": job_id,
-                "hub_ra": self.peer.peer_id,
-                "lead_resource": False,
-                "timestamp": message.get("timestamp"),
-                "instance": {
-                    "resource": res_info,
-                    "k3s_role": "worker",
-                    "node-name": res,  # res is already the key / node name
-                    "original-ms-id": offer_data["ids"]["ms_id"],
-                    "offer-id": next(iter(res_info)),
+        async def dispatch(node, ra_id):
+            payload = {
+                'job_id': job_id, 'hub_ra': self.peer.peer_id,
+                'lead_resource': False, 'timestamp': message.get('timestamp'),
+                'instance': {
+                    'resource': offers[node], 'k3s_role': 'worker', 'node-name': node,
+                    'original-ms-id': next(iter(offers[node].values()))['ids']['ms_id'],
+                    'offer-id': next(iter(offers[node])),
                 },
-                "master_info": {
-                    "k3s_token": k3s_token,
-                    "cluster_name": cluster_name,
-                    "master_ip": master_ip,
-                },
+                'master_info': message['master_info'],
             }
-            self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Sending worker request to RA=%s payload=%s",
-                              self.ra_id, job_id, res, ra_id,
-                              self._redact_sensitive(msg_create_resource))
-            # Approach 2: peer.send is blocking -> run it in a thread, schedule concurrently
-            tasks.append(
-                asyncio.create_task(
-                    asyncio.to_thread(self.peer.send, ra_id, "MSG_CREATE_RESOURCE", msg_create_resource)
-                )
-            )
+            try:
+                await asyncio.to_thread(self.peer.send, ra_id, 'MSG_CREATE_RESOURCE', payload)
+            except Exception as exc:
+                with self.deployment_lock:
+                    self._fail_deployment(job_id, f'Cannot dispatch worker {node}: {exc}')
 
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-        # restore lead count & update state
-        # Ze-DEBUG
-        #self.job_offers[job_id][self.lead_resource[job_id]]["count"] += 1
-        self._update_job_state(job_id, "Running")
+        await asyncio.gather(*(dispatch(node, ra_id) for node, ra_id in expected.items()))
         self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s] Worker requests dispatched: %s",
-                         self.ra_id, job_id, len(tasks))
+                         self.ra_id, job_id, len(expected))
+        self._maybe_request_sa_deployment(job_id)
+
+    def _notify_deployment_result(self, job_id, result, detail):
+        """Send the terminal submission result to the original client."""
+        client_id = self.job_clients.get(job_id)
+        if not client_id:
+            return
+        payload = {'job_id': job_id, 'swarm_id': job_id, 'ra_id': self.ra_id,
+                   'result': result, 'final': True, 'message': detail}
+        try:
+            self.peer.send(client_id, 'MSG_SUBMIT_RESPONSE', payload)
+        except Exception:
+            self.logger.exception("APP %s: cannot deliver final result to client %s", job_id, client_id)
+
+    def _track_master_creation(self, job_id, lead_ra):
+        with self.deployment_lock:
+            pending = {'phase': 'master', 'lead_ra': lead_ra, 'remaining': set()}
+            self.pending_deployments[job_id] = pending
+
+            def expire():
+                with self.deployment_lock:
+                    if self.pending_deployments.get(job_id) is pending:
+                        self._fail_deployment(job_id, 'Timed out waiting for master creation')
+
+            timer = threading.Timer(self.config.get('deployment_timeout_seconds', 1800), expire)
+            timer.daemon = True
+            pending['timer'] = timer
+            timer.start()
+
+    def _handle_create_lead_resource_request(self, peer_id, message):
+        try:
+            self._handle_create_lead_resource(peer_id, message)
+        except Exception as exc:
+            self.logger.exception("APP %s: master creation failed", message.get('job_id'))
+            self.peer.send(message.get('hub_ra', peer_id), 'MSG_MASTER_FAILED', {
+                'job_id': message.get('job_id'), 'message': str(exc)})
+
+    def _handle_master_failed(self, peer_id, message):
+        job_id = message.get('job_id')
+        with self.deployment_lock:
+            pending = self.pending_deployments.get(job_id)
+            if pending and pending['phase'] == 'master' and pending['lead_ra'] == peer_id:
+                self._fail_deployment(job_id, message.get('message', 'Master creation failed'))
+
+    def _fail_deployment(self, job_id, error):
+        """Called with deployment_lock held; late responses cannot revive failures."""
+        pending = self.pending_deployments.get(job_id)
+        if (not pending or pending['phase'] in ('failed', 'done')
+                or job_id in self.deleted_jobs or job_id in self.pending_deletions):
+            return
+        pending['phase'] = 'failed'
+        pending['timer'].cancel()
+        self.job_states.setdefault(job_id, {})['state'] = 'Failed'
+        self.logger.error("[STAGE=DEPLOYMENT RA=%s APP=%s] Deployment failed: %s",
+                          self.ra_id, job_id, error)
+        self._notify_deployment_result(job_id, 'failure', error)
+
+    def _handle_resource_created(self, peer_id, message):
+        job_id = message.get('job_id')
+        node = message.get('node_name')
+        with self.deployment_lock:
+            pending = self.pending_deployments.get(job_id)
+            if (not pending or pending['phase'] != 'workers'
+                    or job_id in self.deleted_jobs or job_id in self.pending_deletions
+                    or node not in pending['remaining']
+                    or pending['expected'].get(node) != peer_id):
+                return
+            if message.get('result') != 'success':
+                self._fail_deployment(job_id, f"Worker {node}: {message.get('message', 'Creation failed')}")
+                return
+            pending['remaining'].remove(node)
+            self.logger.info("APP %s: worker %s created; waiting for %s",
+                             job_id, node, sorted(pending['remaining']))
+        self._maybe_request_sa_deployment(job_id)
+
+    def _maybe_request_sa_deployment(self, job_id):
+        with self.deployment_lock:
+            pending = self.pending_deployments.get(job_id)
+            if (not pending or pending['phase'] != 'workers' or pending['remaining']
+                    or job_id in self.deleted_jobs or job_id in self.pending_deletions):
+                return
+            pending['phase'] = 'sa'
+            lead_ra = pending['lead_ra']
+        try:
+            self.peer.send(lead_ra, 'MSG_DEPLOY_SA', {'job_id': job_id})
+        except Exception as exc:
+            with self.deployment_lock:
+                self._fail_deployment(job_id, f'Cannot request SA deployment: {exc}')
+
+    def _handle_deploy_sa(self, peer_id, message):
+        # Deployment can take minutes; keep the P2P callback free to receive messages.
+        threading.Thread(target=self._deploy_sa_and_respond,
+                         args=(peer_id, message), daemon=True).start()
+
+    def _deploy_sa_and_respond(self, peer_id, message):
+        job_id = message.get('job_id')
+        with self.deployment_lock:
+            context = self.sa_deployment_contexts.get(job_id)
+            if (not context or context['hub_ra'] != peer_id
+                    or job_id in self.deleted_jobs or job_id in self.pending_deletions):
+                return
+            if context['status'] == 'deploying':
+                return
+            response = context.get('response')
+            if response is None:
+                context['status'] = 'deploying'
+        if response is None:
+            response = {'job_id': job_id, 'result': 'success'}
+            try:
+                self._deploy_sa(job_id, context)
+            except Exception as exc:
+                self.logger.exception("APP %s: SA deployment failed", job_id)
+                response.update(result='failure', message=str(exc))
+            with self.deployment_lock:
+                context['status'] = 'done'
+                context['response'] = response
+        self.peer.send(peer_id, 'MSG_SA_DEPLOYED', response)
+
+    def _handle_sa_deployed(self, peer_id, message):
+        job_id = message.get('job_id')
+        with self.deployment_lock:
+            pending = self.pending_deployments.get(job_id)
+            if (not pending or pending['phase'] != 'sa' or pending['lead_ra'] != peer_id
+                    or job_id in self.deleted_jobs or job_id in self.pending_deletions):
+                return
+            if message.get('result') != 'success':
+                self._fail_deployment(job_id, message.get('message', 'SA deployment failed'))
+                return
+            pending['phase'] = 'done'
+            pending['timer'].cancel()
+            self.job_states.setdefault(job_id, {})['state'] = 'Running'
+            self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s] SA deployed; application Running",
+                             self.ra_id, job_id)
+            self._notify_deployment_result(job_id, 'success', 'All resources created and SA deployed successfully')
 
     # sync wrapper for the library
     def _handle_master_info_cb(self, peer_id, message):
@@ -2255,9 +2309,7 @@ class ResourceAgent:
         import threading
 
         def locked_execution(p_id, msg):
-            # This ensures only one thread runs the blocking logic at a time
-            with self.resource_lock:
-                self._handle_create_resource_blocking(p_id, msg)
+            self._create_worker_and_respond(p_id, msg)
 
         thread = threading.Thread(
             target=locked_execution,
@@ -2265,6 +2317,21 @@ class ResourceAgent:
             daemon=True,
         )
         thread.start()
+
+    def _create_worker_and_respond(self, peer_id, message):
+        job_id = message.get('job_id')
+        response = {'job_id': job_id,
+                    'node_name': message.get('instance', {}).get('node-name'),
+                    'result': 'success'}
+        try:
+            with self.resource_lock:
+                if job_id in self.deleted_jobs or job_id in self.pending_deletions:
+                    raise RuntimeError('Application is being deleted or has been deleted')
+                self._handle_create_resource_blocking(peer_id, message)
+        except Exception as exc:
+            self.logger.exception("APP %s: worker creation failed", job_id)
+            response.update(result='failure', message=str(exc))
+        self.peer.send(message.get('hub_ra', peer_id), 'MSG_RESOURCE_CREATED', response)
 
     def _handle_create_resource_blocking(self, peer_id, message):
         """Process create resource request from LRA"""
@@ -2285,10 +2352,10 @@ class ResourceAgent:
         node_name = instance["node-name"]
         self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Worker-node request received from %s",
                          self.ra_id, job_id, node_name, peer_id)
-        self.master_info = message.get('master_info')
-        cluster_name = self.master_info["cluster_name"]
-        master_ip = self.master_info["master_ip"]
-        k3s_token = self.master_info["k3s_token"]
+        master_info = message.get('master_info', {})
+        cluster_name = master_info["cluster_name"]
+        master_ip = master_info["master_ip"]
+        k3s_token = master_info["k3s_token"]
         self.logger.debug("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] role=%s resource=%s cluster=%s master_ip=%s token=<redacted>",
                           self.ra_id, job_id, node_name, k3s_role,
                           resource_name, cluster_name, master_ip)
