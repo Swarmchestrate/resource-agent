@@ -16,7 +16,8 @@ def agent_class():
              '_fail_deployment', '_deploy_sa_and_respond', '_handle_sa_deployed',
              '_create_worker_and_respond', '_clear_job_data', '_deploy_sa',
              '_notify_deployment_result', '_track_master_creation',
-             '_handle_master_failed', '_handle_create_lead_resource_request'}
+             '_handle_master_failed', '_handle_create_lead_resource_request',
+             '_send_deployment_message'}
     cls.body = [n for n in cls.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and n.name in names]
     scope = {'asyncio': asyncio, 'threading': threading, 'Path': Path,
@@ -131,6 +132,7 @@ class DeploymentTests(unittest.TestCase):
 
     def test_worker_sends_success_and_failure_after_creation(self):
         a = self.agent
+        a.peer.peer_id = 'worker-ra'
         a._handle_create_resource_blocking = Mock()
         message = {'job_id': 'app', 'hub_ra': 'hub', 'instance': {'node-name': 'worker-1'}}
         a._create_worker_and_respond('lead', message)
@@ -144,6 +146,7 @@ class DeploymentTests(unittest.TestCase):
 
     def test_lead_deploys_once_and_replies_to_hub(self):
         a = self.agent
+        a.peer.peer_id = 'lead'
         a.sa_deployment_contexts['app'] = {'hub_ra': 'hub', 'status': 'waiting'}
         a._deploy_sa = Mock()
         a._deploy_sa_and_respond('stranger', {'job_id': 'app'})
@@ -160,6 +163,7 @@ class DeploymentTests(unittest.TestCase):
         self.reply('worker-1')
         self.reply('worker-2')
         a.sa_deployment_contexts['app'] = {'hub_ra': 'hub', 'status': 'waiting'}
+        a.peer.peer_id = 'lead'
         a._deploy_sa = Mock(side_effect=RuntimeError('SSH failed'))
         a._deploy_sa_and_respond('hub', {'job_id': 'app'})
         response = a.peer.send.call_args.args[2]
@@ -186,6 +190,7 @@ class DeploymentTests(unittest.TestCase):
         a.capreg.resource_set_get_from_offer.return_value = None
         a._get_instance_node_labels = Mock(return_value={})
         a._deploy_sa = Mock()
+        a._send_deployment_message = a.peer.send
         a._maybe_dump_capacity = Mock()
         sardou = Mock()
         sardou.return_value.get_cluster.return_value = {'node': {
@@ -225,6 +230,52 @@ class DeploymentTests(unittest.TestCase):
         self.assertNotIn('app', a.sa_deployment_contexts)
         self.reply('worker-1')
         self.assertFalse(self.requests())
+
+    def test_local_deployment_delivery_preserves_sender_for_all_message_types(self):
+        a = self.agent
+        routes = {
+            'MSG_CREATE_LEAD_RESOURCE': '_handle_create_lead_resource_request',
+            'MSG_MASTER_INFO': '_handle_master_info_cb',
+            'MSG_MASTER_FAILED': '_handle_master_failed',
+            'MSG_CREATE_RESOURCE': '_handle_create_resource',
+            'MSG_RESOURCE_CREATED': '_handle_resource_created',
+            'MSG_DEPLOY_SA': '_handle_deploy_sa',
+            'MSG_SA_DEPLOYED': '_handle_sa_deployed',
+        }
+        for name in routes.values():
+            setattr(a, name, Mock())
+        for kind, name in routes.items():
+            with self.subTest(kind=kind):
+                payload = {'job_id': 'app'}
+                a._send_deployment_message('hub', kind, payload)
+                getattr(a, name).assert_called_once_with('hub', payload)
+        a.peer.send.assert_not_called()
+        a._send_deployment_message('remote', 'MSG_MASTER_INFO', {'job_id': 'app'})
+        a.peer.send.assert_called_once_with('remote', 'MSG_MASTER_INFO', {'job_id': 'app'})
+
+    def test_hub_can_be_master_and_worker_through_final_client_notification(self):
+        a = self.agent
+        # Local delivery must work even if transport loopback strips the sender.
+        a.job_offers['app']['master']['m']['ids']['ra_id'] = 'hub'
+        for node in ('worker-1', 'worker-2'):
+            next(iter(a.job_offers['app'][node].values()))['ids']['ra_id'] = 'hub'
+        a.sa_deployment_contexts['app'] = {'hub_ra': 'hub', 'status': 'waiting'}
+        a._deploy_sa = Mock()
+        a._handle_create_lead_resource_request = Mock()
+        a._handle_master_info_cb = lambda peer, message: asyncio.run(a._handle_master_info(peer, message))
+        a._handle_create_resource = a._create_worker_and_respond
+        a._handle_create_resource_blocking = Mock()
+        a._handle_deploy_sa = a._deploy_sa_and_respond
+        # A transport send to self would return a blank sender; no such send is allowed.
+        def send(target, kind, payload):
+            self.assertNotEqual(target, 'hub')
+        a.peer.send.side_effect = send
+        a._track_master_creation('app', 'hub')
+        a._send_deployment_message('hub', 'MSG_MASTER_INFO', self.master_message)
+        self.assertEqual(a._handle_create_resource_blocking.call_count, 2)
+        a._deploy_sa.assert_called_once()
+        self.assertEqual(a.job_states['app']['state'], 'Running')
+        self.assertEqual(self.final_responses()[0]['result'], 'success')
 
     def final_responses(self):
         return [c.args[2] for c in self.agent.peer.send.call_args_list

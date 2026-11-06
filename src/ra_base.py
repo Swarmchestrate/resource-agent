@@ -1117,7 +1117,7 @@ class ResourceAgent:
         
         self._track_master_creation(job_id, LR_id)
         try:
-            self.peer.send(LR_id, "MSG_CREATE_LEAD_RESOURCE", msg_lead_resource_request_ra)
+            self._send_deployment_message(LR_id, "MSG_CREATE_LEAD_RESOURCE", msg_lead_resource_request_ra)
         except Exception as exc:
             with self.deployment_lock:
                 self._fail_deployment(job_id, f'Cannot request master creation: {exc}')
@@ -2048,7 +2048,7 @@ class ResourceAgent:
                 "timestamp": message.get('timestamp'),
                 "master_info": { "k3s_token": k3s_token ,"cluster_name": cluster_name, "master_ip": master_ip}
             }
-            self.peer.send(message.get('hub_ra'), "MSG_MASTER_INFO", msg_master_info)
+            self._send_deployment_message(message.get('hub_ra'), "MSG_MASTER_INFO", msg_master_info)
             self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s NODE=%s] Lead node created; cluster=%s",
                              self.ra_id, job_id, node_name, cluster_name)
  
@@ -2103,7 +2103,8 @@ class ResourceAgent:
             lead = self.lead_resource[job_id]
             lead_ra = next(iter(offers[lead].values()))['ids']['ra_id']
             if peer_id != lead_ra:
-                self.logger.warning("APP %s: master info from unexpected RA %s", job_id, peer_id)
+                self.logger.warning("APP %s: master info from unexpected RA %r (expected %r)",
+                                    job_id, peer_id, lead_ra)
                 return
             previous = self.pending_deployments.get(job_id)
             if previous:
@@ -2140,7 +2141,7 @@ class ResourceAgent:
                 'master_info': message['master_info'],
             }
             try:
-                await asyncio.to_thread(self.peer.send, ra_id, 'MSG_CREATE_RESOURCE', payload)
+                await asyncio.to_thread(self._send_deployment_message, ra_id, 'MSG_CREATE_RESOURCE', payload)
             except Exception as exc:
                 with self.deployment_lock:
                     self._fail_deployment(job_id, f'Cannot dispatch worker {node}: {exc}')
@@ -2149,6 +2150,21 @@ class ResourceAgent:
         self.logger.info("[STAGE=DEPLOYMENT RA=%s APP=%s] Worker requests dispatched: %s",
                          self.ra_id, job_id, len(expected))
         self._maybe_request_sa_deployment(job_id)
+
+    def _send_deployment_message(self, target, message_type, payload):
+        """Preserve sender identity for local delivery (P2P loopback omits it)."""
+        if target != self.peer.peer_id:
+            return self.peer.send(target, message_type, payload)
+        handlers = {
+            'MSG_CREATE_LEAD_RESOURCE': '_handle_create_lead_resource_request',
+            'MSG_MASTER_INFO': '_handle_master_info_cb',
+            'MSG_MASTER_FAILED': '_handle_master_failed',
+            'MSG_CREATE_RESOURCE': '_handle_create_resource',
+            'MSG_RESOURCE_CREATED': '_handle_resource_created',
+            'MSG_DEPLOY_SA': '_handle_deploy_sa',
+            'MSG_SA_DEPLOYED': '_handle_sa_deployed',
+        }
+        return getattr(self, handlers[message_type])(self.peer.peer_id, payload)
 
     def _notify_deployment_result(self, job_id, result, detail):
         """Send the terminal submission result to the original client."""
@@ -2182,7 +2198,7 @@ class ResourceAgent:
             self._handle_create_lead_resource(peer_id, message)
         except Exception as exc:
             self.logger.exception("APP %s: master creation failed", message.get('job_id'))
-            self.peer.send(message.get('hub_ra', peer_id), 'MSG_MASTER_FAILED', {
+            self._send_deployment_message(message.get('hub_ra', peer_id), 'MSG_MASTER_FAILED', {
                 'job_id': message.get('job_id'), 'message': str(exc)})
 
     def _handle_master_failed(self, peer_id, message):
@@ -2232,7 +2248,7 @@ class ResourceAgent:
             pending['phase'] = 'sa'
             lead_ra = pending['lead_ra']
         try:
-            self.peer.send(lead_ra, 'MSG_DEPLOY_SA', {'job_id': job_id})
+            self._send_deployment_message(lead_ra, 'MSG_DEPLOY_SA', {'job_id': job_id})
         except Exception as exc:
             with self.deployment_lock:
                 self._fail_deployment(job_id, f'Cannot request SA deployment: {exc}')
@@ -2264,7 +2280,7 @@ class ResourceAgent:
             with self.deployment_lock:
                 context['status'] = 'done'
                 context['response'] = response
-        self.peer.send(peer_id, 'MSG_SA_DEPLOYED', response)
+        self._send_deployment_message(peer_id, 'MSG_SA_DEPLOYED', response)
 
     def _handle_sa_deployed(self, peer_id, message):
         job_id = message.get('job_id')
@@ -2331,7 +2347,7 @@ class ResourceAgent:
         except Exception as exc:
             self.logger.exception("APP %s: worker creation failed", job_id)
             response.update(result='failure', message=str(exc))
-        self.peer.send(message.get('hub_ra', peer_id), 'MSG_RESOURCE_CREATED', response)
+        self._send_deployment_message(message.get('hub_ra', peer_id), 'MSG_RESOURCE_CREATED', response)
 
     def _handle_create_resource_blocking(self, peer_id, message):
         """Process create resource request from LRA"""
