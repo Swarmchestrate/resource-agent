@@ -1892,14 +1892,17 @@ class ResourceAgent:
               # general
             ssh_user = node_info.get("ssh_user", "ec2-user")
             labels = self._get_instance_node_labels(job_id, node_info)
+            # We need to ensure the ms_id is the same as node_name so that k3s_client migration can perform correctly,
+            # However, we must ensure this do not conflict with affinity requirements of the microservice
+            # for example, if affinity set to ms_id but labels set of ms_id_index, then the mismatch will prevent deployment.
             if original_ms_id != node_name:
-                labels['labels.swarmchestrate.eu/ms_id'] = original_ms_id
+                labels['labels.swarmchestrate.eu/ms_id'] = node_name
             assigned_ms_id = labels.get('labels.swarmchestrate.eu/ms_id')
             self.logger.info(
                 "[INFO] job_id=%s original_ms_id=%s node_name=%s assigned_ms_id=%s",
                 job_id, original_ms_id, node_name, assigned_ms_id,
             )
-            raise SystemExit(1)
+            #raise SystemExit(1)
             node_labels = [f"{key}={value}" for key, value in labels.items()]
             
             # resource specific configurations for cluster builder's iuputs
@@ -2399,7 +2402,7 @@ class ResourceAgent:
         node_info = next(iter(cluster_info.values()), {})
         labels = self._get_instance_node_labels(job_id, node_info)
         if resource_name != node_name:
-            labels['labels.swarmchestrate.eu/ms_id'] = resource_name
+            labels['labels.swarmchestrate.eu/ms_id'] = node_name
         node_labels = [f"{key}={value}" for key, value in labels.items()]
         
         ssh_key_path = node_info.get("ssh_key", "")
