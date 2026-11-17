@@ -1894,6 +1894,12 @@ class ResourceAgent:
             labels = self._get_instance_node_labels(job_id, node_info)
             if original_ms_id != node_name:
                 labels['labels.swarmchestrate.eu/ms_id'] = original_ms_id
+            assigned_ms_id = labels.get('labels.swarmchestrate.eu/ms_id')
+            self.logger.info(
+                "[INFO] job_id=%s original_ms_id=%s node_name=%s assigned_ms_id=%s",
+                job_id, original_ms_id, node_name, assigned_ms_id,
+            )
+            raise SystemExit(1)
             node_labels = [f"{key}={value}" for key, value in labels.items()]
             
             # resource specific configurations for cluster builder's iuputs
